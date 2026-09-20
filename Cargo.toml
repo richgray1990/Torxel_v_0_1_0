@@ -1,0 +1,49 @@
+[package]
+name = "Torxel_v_0_1_0"
+version = "0.1.0"
+edition = "2024"
+description = "Voxel world in Bevy with toroidal topology"
+default-run = "Torxel_v_0_1_0"
+
+[lib]
+name = "torxel"
+path = "src/lib.rs"
+
+[[bin]]
+name = "generate_world"
+path = "src/bin/generate_world.rs"
+
+[dependencies]
+bevy = "0.19.1"
+bytemuck = "1"
+flume = "0.12.0"
+crossbeam = "0.8"
+rayon = "1.10"
+smallvec = "1.16.0"
+
+[features]
+default = ["side16", "height64"]
+side8 = []
+side16 = []
+side32 = []
+height64 = []
+height128 = []
+height256 = []
+height512 = []
+height1024 = []
+
+# Dev профиль: быстрая компиляция для итераций
+[profile.dev]
+opt-level = 1 # Немного оптимизируем, чтобы тесты летали
+split-debuginfo = "packed"
+
+# Dev с флагами беви (для динамической линковки)
+[profile.dev.package."*"]
+opt-level = 3
+
+# Release профиль: МАКСИМАЛЬНАЯ производительность
+[profile.release]
+opt-level = 3
+lto = "thin"       # Link Time Optimization (сквозная оптимизация)
+codegen-units = 1  # Максимальная оптимизация кода (долгая сборка)
+panic = "abort"    # Меньше размер бинарника, быстрее краш (без unwind)
