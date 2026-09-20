@@ -34,6 +34,7 @@ use crate::systems::{
     request_swap_system, shadow_copy_system, shadow_gc_system,
     swap_pointers_system, update_window_system, InitialCopyDone, WindowInitialized,
 };
+use crate::systems::debug::{debug_report_system, DebugTimer};
 
 /// Системные сеты (уровень 1 — строгая цепочка)
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -139,6 +140,7 @@ impl Plugin for TorxelPlugin {
         app.init_resource::<ShadowCopyManager>();
         app.init_resource::<CameraController>();
         app.init_resource::<MeshStorage>();
+        app.init_resource::<DebugTimer>();
 
         // ═══════════════════════════════════════════════════════════
         // Уровень 1: строгая цепочка фаз
@@ -316,5 +318,7 @@ impl Plugin for TorxelPlugin {
             Update,
             shadow_copy_system.in_set(GameFlowSet::ShadowCopy),
         );
+
+        app.add_systems(Update, debug_report_system);
     }
 }
