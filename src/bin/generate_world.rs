@@ -86,35 +86,14 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
     let mut min_liquid = CHUNK_HEIGHT as u16;
     let mut max_liquid = 0u16;
 
-    // Визуальная зависимость от позиции чанка.
-    // Используем (chunk_x + chunk_z) % 4 для выбора материала верхнего слоя.
-    // Это создаёт шахматный узор из разных материалов на карте,
-    // позволяя визуально отличать чанки друг от друга.
-    let surface_variant = (chunk_x + chunk_z).rem_euclid(4);
-
     for lz in 0..CHUNK_SIDE {
         for lx in 0..CHUNK_SIDE {
-            let wx = chunk_x * CHUNK_SIDE as i64 + lx as i64;
-            let wz = chunk_z * CHUNK_SIDE as i64 + lz as i64;
-            let height = terrain_height(wx, wz);
-
             for ly in 0..CHUNK_HEIGHT {
                 let cell_index = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
 
+                // Плоский мир: только stone на y=0, остальное воздух
                 let material = if ly == 0 {
-                    BEDROCK
-                } else if ly < height.saturating_sub(4) {
                     STONE
-                } else if ly < height.saturating_sub(1) {
-                    DIRT
-                } else if ly < height {
-                    // Верхний слой зависит от позиции чанка
-                    match surface_variant {
-                        0 => GRASS,
-                        1 => CLAY,
-                        2 => DIRT,
-                        _ => STONE,
-                    }
                 } else {
                     AIR
                 };
@@ -122,7 +101,6 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
                 cells[cell_index].material_id = material;
                 cells[cell_index].phase_state = if material == AIR { GAS } else { SOLID };
 
-                // Обновляем высотные границы
                 if material != AIR {
                     let y = ly as u16;
                     if y < min_solid {
@@ -146,13 +124,6 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
     (cells, header)
 }
 
-fn terrain_height(x: i64, z: i64) -> usize {
-    let base = 32.0;
-    let noise1 = (x as f64 * 0.05).sin() * 8.0;
-    let noise2 = (z as f64 * 0.05).cos() * 8.0;
-    let noise3 = ((x + z) as f64 * 0.02).sin() * 4.0;
-    let noise4 = ((x - z) as f64 * 0.03).cos() * 3.0;
-
-    let height = base + noise1 + noise2 + noise3 + noise4;
-    height.max(1.0).min(CHUNK_HEIGHT as f64 - 1.0) as usize
+fn terrain_height(_x: i64, _z: i64) -> usize {
+    1
 }
