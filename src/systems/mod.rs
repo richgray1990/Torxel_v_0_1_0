@@ -13,7 +13,8 @@ pub mod dispatch_loaded;
 pub mod request_swap;
 pub mod shadow_requests;
 pub mod shadow_gc;
-pub mod render_stub;
+pub mod debug;
+//pub mod render_stub;
 
 pub use poll_tasks::poll_background_tasks_system;
 pub use poll_shadow_tasks::poll_shadow_tasks_system;
@@ -28,4 +29,5 @@ pub use dispatch_loaded::dispatch_loaded_events_system;
 pub use request_swap::request_swap_system;
 pub use shadow_requests::process_shadow_requests_system;
 pub use shadow_gc::shadow_gc_system;
-pub use render_stub::render_stub_system;
+pub use debug::{debug_report_system, DebugTimer};
+//pub use render_stub::render_stub_system;

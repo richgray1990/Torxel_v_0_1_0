@@ -17,9 +17,6 @@ pub struct WindowInitialized {
 }
 
 /// Система инициализации окна (один раз при старте).
-///
-/// Читает позицию спавна из заголовка файла,
-/// ставит начальные чанки в очередь загрузки.
 pub fn initialize_window_system(
     mut commands: Commands,
     header: Res<WorldHeader>,
@@ -61,8 +58,9 @@ pub fn initialize_window_system(
             });
 
             manager.set_slot_state(slot, SlotState::Queued);
-            manager.metadata[slot].grid_x = chunk_x as i64;
-            manager.metadata[slot].grid_z = chunk_z as i64;
+            // ИСПРАВЛЕНИЕ: сохраняем нормализованные координаты
+            manager.metadata[slot].grid_x = norm_x as i64;
+            manager.metadata[slot].grid_z = norm_z as i64;
         }
     }
 
@@ -78,11 +76,13 @@ pub fn initialize_window_system(
     pipeline.phase = ComputePhase::AwaitingPostSwap;
 
     initialized.done = true;
+
+    println!("[INIT] Window centered on spawn chunk ({}, {})", spawn_chunk_x, spawn_chunk_z);
+    println!("[INIT] Camera anchor set to ({}, {}, {})", 
+        controller.anchor_x, controller.anchor_y, controller.anchor_z);
 }
 
 /// Система обновления окна при движении игрока.
-///
-/// Отправляет запросы из очереди загрузки в фоновый воркер.
 pub fn update_window_system(
     mut manager: ResMut<ChunkManager>,
     io_manager: Res<crate::io::channels::IoManager>,
@@ -95,6 +95,7 @@ pub fn update_window_system(
     // Отправляем запросы загрузки из очереди в воркер
     let requests: Vec<LoadRequest> = manager.load_queue.drain(..).collect();
     for request in requests {
+        manager.metadata[request.slot].set_active(true);
         manager.set_slot_state(request.slot, SlotState::Loading);
         io_manager.queue_load(request);
     }
@@ -105,10 +106,11 @@ pub fn update_window_system(
         manager.set_slot_state(request.slot, SlotState::Saving);
         io_manager.queue_save(request);
     }
-
+    
     // TODO: Отслеживание позиции игрока
     // Если игрок пересёк границу чанка +/- 3:
     // 1. Сдвигаем окно
     // 2. Ставим новые чанки в очередь загрузки
     // 3. Помечаем старые чанки на выгрузку
+    
 }

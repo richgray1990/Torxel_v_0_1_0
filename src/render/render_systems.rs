@@ -7,7 +7,10 @@ use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue
 use crate::render::camera::CameraController;
 use crate::render::mesh_builder::build_subchunk_mesh;
 use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState};
-use crate::voxel::format::{CHUNK_HEIGHT, CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y, SUBCHUNK_SIDE, SUBCHUNK_HEIGHT, WorldDimensions};
+use crate::voxel::format::{
+    CHUNK_HEIGHT, CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
+    SUBCHUNK_SIDE, SUBCHUNK_HEIGHT, WorldDimensions,
+};
 use crate::voxel::pool::ReadWorld;
 
 pub fn process_mesh_events_system(
@@ -103,6 +106,15 @@ pub fn build_meshes_system(
             dimensions.depth as i64,
         );
 
+        // ИСПРАВЛЕНИЕ: Не создаём меш если нет вершин
+        if mesh_data.positions.is_empty() {
+            // Субчанк пустой — помечаем как Ready без меша
+            data.current_mesh = None;
+            data.pending_mesh = None;
+            data.state = SubchunkRenderState::Ready;
+            continue;
+        }
+
         let mut mesh = Mesh::new(
             bevy::render::mesh::PrimitiveTopology::TriangleList,
             Default::default(),
@@ -132,6 +144,8 @@ pub fn build_meshes_system(
 
 pub fn swap_meshes_system(
     mut mesh_storage: ResMut<MeshStorage>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let mut to_swap: Vec<SubchunkKey> = Vec::new();
 
@@ -147,7 +161,17 @@ pub fn swap_meshes_system(
             None => continue,
         };
 
+        // Удаляем старый меш из Assets
+        if let Some(old_mesh) = data.current_mesh.take() {
+            meshes.remove(&old_mesh);
+        }
+
+        // Заменяем на новый
         if let Some(new_mesh) = data.pending_mesh.take() {
+            // Обновляем компонент Mesh3d на сущности
+            if let Some(entity) = data.entity {
+                commands.entity(entity).insert(Mesh3d(new_mesh.clone()));
+            }
             data.current_mesh = Some(new_mesh);
         }
         data.state = SubchunkRenderState::Ready;
@@ -166,9 +190,16 @@ pub fn update_mesh_entities_system(
             continue;
         }
 
+        // ИСПРАВЛЕНИЕ: Пропускаем субчанки без меша (пустые)
         let mesh_handle = match &data.current_mesh {
             Some(h) => h.clone(),
-            None => continue,
+            None => {
+                // Если была сущность — удаляем
+                if let Some(entity) = data.entity.take() {
+                    commands.entity(entity).despawn();
+                }
+                continue;
+            }
         };
 
         let sub_x_offset = (key.subchunk_index % SUBCHUNKS_X) as f32 * SUBCHUNK_SIDE as f32;

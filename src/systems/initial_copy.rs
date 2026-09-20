@@ -1,12 +1,8 @@
 //! Начальное копирование данных из WriteWorld в ReadWorld.
-//!
-//! При старте игры чанки загружаются из файла в WriteWorld.
-//! Рендер читает из ReadWorld. Нужно скопировать данные.
-//! Указатели не меняем — только копирование.
 
 use bevy::prelude::*;
 
-use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::format::WINDOW_CHUNK_COUNT;
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 use crate::manager::{ChunkManager, SlotState};
 use crate::signals::{ComputePhase, ComputePipeline};
@@ -25,31 +21,35 @@ pub fn initial_copy_system(
     mut pipeline: ResMut<ComputePipeline>,
     mut initial_copy: ResMut<InitialCopyDone>,
 ) {
-    // Работаем только один раз
     if initial_copy.done {
         return;
     }
 
-    // Работаем только если фаза ожидает пост-свап
     if pipeline.phase != ComputePhase::AwaitingPostSwap {
         return;
     }
 
-    // Проверяем, что все чанки загружены
-    let all_ready = (0..POOL_CHUNK_COUNT).all(|slot| {
-        manager.get_slot_state(slot) == SlotState::Ready
+    // ИСПРАВЛЕНИЕ: пропускаем Failed слоты
+    let all_ready = (0..WINDOW_CHUNK_COUNT).all(|slot| {
+        let state = manager.get_slot_state(slot);
+        state == SlotState::Ready || state == SlotState::Failed
     });
 
     if !all_ready {
         return;
     }
 
-    // Копируем все чанки из WriteWorld в ReadWorld
-    for slot in 0..POOL_CHUNK_COUNT {
-        read_world.0.copy_chunk_from(&write_world.0, slot);
+    // ИСПРАВЛЕНИЕ: копируем только Ready слоты
+    let mut copied = 0;
+    for slot in 0..WINDOW_CHUNK_COUNT {
+        if manager.get_slot_state(slot) == SlotState::Ready {
+            read_world.0.copy_chunk_from(&write_world.0, slot);
+            copied += 1;
+        }
     }
 
-    // Начальное копирование завершено
+    println!("[INITIAL_COPY] Copied {} chunks from WriteWorld to ReadWorld", copied);
+
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;
 }
