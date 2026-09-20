@@ -55,6 +55,9 @@ pub fn chunk_garbage_collector_system(
             manager.set_slot_state(slot, SlotState::AwaitingSave);
         } else {
             // Чанк чистый — просто освобождаем слот
+            // Сбрасываем флаг уведомления рендера,
+            // чтобы при повторной загрузке событие отправилось снова
+            meta.set_render_notified(false);
             manager.set_slot_state(slot, SlotState::Empty);
         }
     }

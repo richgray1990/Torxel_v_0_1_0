@@ -31,6 +31,9 @@ pub struct SlotMetadata {
     /// Битовая маска грязных субчанков
     pub dirty_subchunks: AtomicU64,
 
+    /// Флаг: уведомлён ли рендер о загрузке чанка
+    pub render_notified: AtomicBool,
+
     // Высотные границы (записываются один раз при загрузке)
     pub min_solid_y: u16,
     pub max_solid_y: u16,
@@ -50,6 +53,7 @@ impl SlotMetadata {
             is_shadow: AtomicBool::new(false),
             unload_timer: AtomicU32::new(0),
             dirty_subchunks: AtomicU64::new(0),
+            render_notified: AtomicBool::new(false),
             min_solid_y: CHUNK_HEIGHT as u16,
             max_solid_y: 0,
             min_liquid_y: CHUNK_HEIGHT as u16,
@@ -112,7 +116,7 @@ impl SlotMetadata {
             self.unload_timer.store(current - 1, Ordering::Release);
         }
     }
-    
+
     // ═══════════════════════════════════════════════════════════
     // Субчанки
     // ═══════════════════════════════════════════════════════════
@@ -139,6 +143,22 @@ impl SlotMetadata {
     #[inline(always)]
     pub fn clear_dirty_subchunks(&self) {
         self.dirty_subchunks.store(0, Ordering::Release);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Уведомление рендера
+    // ═══════════════════════════════════════════════════════════
+
+    /// Уведомлён ли рендер о загрузке чанка
+    #[inline(always)]
+    pub fn is_render_notified(&self) -> bool {
+        self.render_notified.load(Ordering::Acquire)
+    }
+
+    /// Установить флаг уведомления рендера
+    #[inline(always)]
+    pub fn set_render_notified(&self, notified: bool) {
+        self.render_notified.store(notified, Ordering::Release);
     }
 }
 

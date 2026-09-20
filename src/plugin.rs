@@ -28,6 +28,7 @@ use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePipeline, SwapSignal};
 use crate::systems::{
     apply_cell_events_system, chunk_garbage_collector_system, dispatch_dirty_events_system,
+    dispatch_loaded_events_system,
     initial_copy_system, initialize_window_system, poll_background_tasks_system,
     poll_shadow_tasks_system, post_swap_copy_system, process_shadow_requests_system,
     request_swap_system, shadow_copy_system, shadow_gc_system,
@@ -47,7 +48,9 @@ pub enum GameFlowSet {
     ShadowCopy,
     /// Обмен указателей активного пула
     SwapPointers,
-    /// Передача событий рендеру
+    /// Передача событий рендеру о загрузке чанков
+    DispatchLoadedEvents,
+    /// Передача событий рендеру об изменении чанков
     DispatchDirtyEvents,
     /// Окно параллелизма (рендер + обсчёт)
     ParallelWork,
@@ -148,6 +151,7 @@ impl Plugin for TorxelPlugin {
                 GameFlowSet::UpdatePhase,
                 GameFlowSet::ShadowCopy,
                 GameFlowSet::SwapPointers,
+                GameFlowSet::DispatchLoadedEvents,
                 GameFlowSet::DispatchDirtyEvents,
                 GameFlowSet::ParallelWork,
                 GameFlowSet::RequestSwap,
@@ -249,6 +253,12 @@ impl Plugin for TorxelPlugin {
         app.add_systems(
             Update,
             swap_pointers_system.in_set(GameFlowSet::SwapPointers),
+        );
+
+        // DispatchLoadedEvents
+        app.add_systems(
+            Update,
+            dispatch_loaded_events_system.in_set(GameFlowSet::DispatchLoadedEvents),
         );
 
         // DispatchDirtyEvents

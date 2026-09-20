@@ -33,7 +33,7 @@ impl CameraController {
             yaw_index: 0,
             zoom_index: 0,
             anchor_x: 0.0,
-            anchor_y: 32.0,
+            anchor_y: 64.0,
             anchor_z: 0.0,
             view_half_width: 16.0 / initial_zoom,
             view_half_height: 16.0 / initial_zoom,
