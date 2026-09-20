@@ -89,6 +89,7 @@ impl TorusTopology {
 
     /// Возвращает индекс слота в активном окне.
     /// None если чанк вне окна.
+    /// ИСПРАВЛЕНО: работает с тороидальной топологией
     #[inline(always)]
     pub fn slot_index_in_window(
         &self,
@@ -97,16 +98,14 @@ impl TorusTopology {
         window_min_x: i64,
         window_min_z: i64,
     ) -> Option<usize> {
-        let local_x = chunk_x as i64 - window_min_x;
-        let local_z = chunk_z as i64 - window_min_z;
+        // Нормализуем координаты чанка относительно window_min через тор
+        let dx = (chunk_x as i64 - window_min_x).rem_euclid(self.chunks_x as i64);
+        let dz = (chunk_z as i64 - window_min_z).rem_euclid(self.chunks_z as i64);
 
-        if local_x < 0 || local_x >= WINDOW_SIDE as i64 {
-            return None;
-        }
-        if local_z < 0 || local_z >= WINDOW_SIDE as i64 {
+        if dx >= WINDOW_SIDE as i64 || dz >= WINDOW_SIDE as i64 {
             return None;
         }
 
-        Some((local_z as usize) * WINDOW_SIDE + (local_x as usize))
+        Some((dz as usize) * WINDOW_SIDE + (dx as usize))
     }
 }

@@ -14,7 +14,7 @@ pub struct ChunkManager {
     pub metadata: Vec<SlotMetadata>,
     pub topology: TorusTopology,
 
-    // Границы активного окна
+    // Границы активного окна (ненормализованные, могут быть отрицательными)
     pub window_min_x: i64,
     pub window_min_z: i64,
     pub window_max_x: i64,
@@ -59,14 +59,13 @@ impl ChunkManager {
     }
 
     /// Проверяет, входит ли чанк в активное окно
+    /// ИСПРАВЛЕНО: работает с тороидальной топологией
     #[inline(always)]
     pub fn is_in_window(&self, chunk_x: usize, chunk_z: usize) -> bool {
-        let cx = chunk_x as i64;
-        let cz = chunk_z as i64;
-        cx >= self.window_min_x
-            && cx <= self.window_max_x
-            && cz >= self.window_min_z
-            && cz <= self.window_max_z
+        let dx = (chunk_x as i64 - self.window_min_x).rem_euclid(self.topology.chunks_x as i64);
+        let dz = (chunk_z as i64 - self.window_min_z).rem_euclid(self.topology.chunks_z as i64);
+
+        dx < WINDOW_SIDE as i64 && dz < WINDOW_SIDE as i64
     }
 
     /// Возвращает индекс слота для чанка в активном окне
@@ -169,7 +168,7 @@ impl ChunkManager {
     pub fn active_window_slots(&self) -> std::ops::Range<usize> {
         0..crate::voxel::format::WINDOW_CHUNK_COUNT
     }
-    
+
     /// Возвращает координаты чанка для слота активного окна.
     #[inline]
     pub fn slot_to_chunk_coords(&self, slot: usize) -> Option<(i64, i64)> {
