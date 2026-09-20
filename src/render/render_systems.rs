@@ -104,6 +104,7 @@ pub fn build_meshes_system(
             slot,
             dimensions.width as i64,
             dimensions.depth as i64,
+            &manager,
         );
 
         // ИСПРАВЛЕНИЕ: Не создаём меш если нет вершин

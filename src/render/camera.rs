@@ -168,8 +168,10 @@ pub fn camera_input_system(
         let cos_yaw = yaw.cos() as f64;
         let sin_yaw = yaw.sin() as f64;
 
-        let rotated_x = move_x * cos_yaw - move_z * sin_yaw;
-        let rotated_z = move_x * sin_yaw + move_z * cos_yaw;
+        // ИСПРАВЛЕНИЕ: формула вращения по часовой стрелке
+        // (соответствует направлению взгляда в look_direction)
+        let rotated_x = move_x * cos_yaw + move_z * sin_yaw;
+        let rotated_z = -move_x * sin_yaw + move_z * cos_yaw;
 
         let speed = MOVE_SPEED as f64 * dt as f64;
         controller.anchor_x += rotated_x * speed;

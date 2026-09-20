@@ -80,8 +80,9 @@ pub fn build_subchunk_mesh(
     subchunk_index: usize,
     pool: &ChunkPool,
     slot: usize,
-    _world_width: i64,
-    _world_depth: i64,
+    chunk_x: i64,
+    chunk_z: i64,
+    manager: &crate::manager::ChunkManager,
 ) -> SubchunkMeshData {
     let mut mesh_data = SubchunkMeshData::new();
 
@@ -109,7 +110,12 @@ pub fn build_subchunk_mesh(
                     let ny = ly as i64 + dy;
                     let nz = lz as i64 + dz;
 
-                    let visible = is_face_visible(nx, ny, nz, pool, slot);
+                    let visible = is_face_visible(
+                        nx, ny, nz,
+                        pool, slot,
+                        chunk_x, chunk_z,
+                        manager,
+                    );
 
                     if visible {
                         let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.5;
@@ -151,23 +157,59 @@ fn is_face_visible(
     neighbor_z: i64,
     pool: &ChunkPool,
     slot: usize,
+    chunk_x: i64,
+    chunk_z: i64,
+    manager: &crate::manager::ChunkManager,
 ) -> bool {
+    // Проверка по Y
     if neighbor_y < 0 {
         return false;
     }
     if neighbor_y >= CHUNK_HEIGHT as i64 {
         return true;
     }
-    if neighbor_x < 0 || neighbor_x >= CHUNK_SIDE as i64 {
-        return false;
-    }
-    if neighbor_z < 0 || neighbor_z >= CHUNK_SIDE as i64 {
-        return false;
+
+    // Определяем координаты соседнего блока
+    let mut n_chunk_x = chunk_x;
+    let mut n_chunk_z = chunk_z;
+    let mut n_local_x = neighbor_x;
+    let mut n_local_z = neighbor_z;
+
+    // Переход в соседний чанк по X
+    if neighbor_x < 0 {
+        n_chunk_x -= 1;
+        n_local_x += CHUNK_SIDE as i64;
+    } else if neighbor_x >= CHUNK_SIDE as i64 {
+        n_chunk_x += 1;
+        n_local_x -= CHUNK_SIDE as i64;
     }
 
-    let idx = (neighbor_z as usize * CHUNK_SIDE + neighbor_x as usize) * CHUNK_HEIGHT
-        + neighbor_y as usize;
-    let neighbor_cell = pool.get(slot, idx);
+    // Переход в соседний чанк по Z
+    if neighbor_z < 0 {
+        n_chunk_z -= 1;
+        n_local_z += CHUNK_SIDE as i64;
+    } else if neighbor_z >= CHUNK_SIDE as i64 {
+        n_chunk_z += 1;
+        n_local_z -= CHUNK_SIDE as i64;
+    }
 
-    is_transparent(neighbor_cell.material_id)
+    // Если сосед в том же чанке
+    if n_chunk_x == chunk_x && n_chunk_z == chunk_z {
+        let idx = (n_local_z as usize * CHUNK_SIDE + n_local_x as usize) * CHUNK_HEIGHT
+            + neighbor_y as usize;
+        let neighbor_cell = pool.get(slot, idx);
+        return is_transparent(neighbor_cell.material_id);
+    }
+
+    // Сосед в другом чанке — ищем слот через менеджер
+    let (norm_x, norm_z) = manager.topology.normalize_chunk(n_chunk_x, n_chunk_z);
+    if let Some(n_slot) = manager.slot_for_chunk(norm_x as usize, norm_z as usize) {
+        let idx = (n_local_z as usize * CHUNK_SIDE + n_local_x as usize) * CHUNK_HEIGHT
+            + neighbor_y as usize;
+        let neighbor_cell = pool.get(n_slot, idx);
+        return is_transparent(neighbor_cell.material_id);
+    }
+
+    // Соседний чанк не загружен — не рисуем грань
+    false
 }
