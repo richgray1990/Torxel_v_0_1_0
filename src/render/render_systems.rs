@@ -181,6 +181,7 @@ pub fn swap_meshes_system(
 pub fn update_mesh_entities_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
     mut transforms: Query<&mut Transform>,
@@ -222,9 +223,15 @@ pub fn update_mesh_entities_system(
                 }
             }
             None => {
+                let material_handle = materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    ..Default::default()
+                });
+
                 let entity = commands
                     .spawn((
                         Mesh3d(mesh_handle),
+                        MeshMaterial3d(material_handle),
                         Transform::from_translation(position),
                         Visibility::default(),
                     ))

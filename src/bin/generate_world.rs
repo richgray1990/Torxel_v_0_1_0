@@ -44,8 +44,8 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
     // Заголовок мира
     let header = WorldHeader::new(chunks_x, chunks_z, CHUNK_HEIGHT as u32)
         .with_spawn(
-            (chunks_x / 2 * CHUNK_SIDE as u32) as i32,
-            (chunks_z / 2 * CHUNK_SIDE as u32) as i32,
+            (5) as i32,
+            (3) as i32,
         );
     let header_bytes: &[u8] = bytemuck::bytes_of(&header);
     writer.write_all(header_bytes).expect("Failed to write header");

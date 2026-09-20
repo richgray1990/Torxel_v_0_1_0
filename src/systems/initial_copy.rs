@@ -21,14 +21,17 @@ pub fn initial_copy_system(
     mut pipeline: ResMut<ComputePipeline>,
     mut initial_copy: ResMut<InitialCopyDone>,
 ) {
+    
     if initial_copy.done {
         return;
     }
 
-    if pipeline.phase != ComputePhase::AwaitingPostSwap {
-        return;
-    }
-
+    // if pipeline.phase != ComputePhase::AwaitingPostSwap {
+    //     println!("[INITIAL_COPY] EXT: phase != AwaitingPostSwap");
+    //     return;
+    // }
+    
+    
     // ИСПРАВЛЕНИЕ: пропускаем Failed слоты
     let all_ready = (0..WINDOW_CHUNK_COUNT).all(|slot| {
         let state = manager.get_slot_state(slot);
@@ -36,6 +39,7 @@ pub fn initial_copy_system(
     });
 
     if !all_ready {
+        println!("[INITIAL_COPY] EXT: !all_ready");
         return;
     }
 
@@ -48,7 +52,7 @@ pub fn initial_copy_system(
         }
     }
 
-    println!("[INITIAL_COPY] Copied {} chunks from WriteWorld to ReadWorld", copied);
+    println!("[INITIAL_COPY] DONE! Copied {} chunks from WriteWorld to ReadWorld", copied);
 
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;

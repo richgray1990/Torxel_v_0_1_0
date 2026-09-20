@@ -111,6 +111,10 @@ impl IoWorker {
             (request.chunk_z * header.chunks_x as usize + request.chunk_x) as u64;
         let offset = header_size + chunk_index * chunk_total_size;
 
+        // ОТЛАДКА
+        println!("[WORKER] Load request: chunk ({},{}), index={}, offset={}",
+            request.chunk_x, request.chunk_z, chunk_index, offset);
+
         if file.seek(SeekFrom::Start(offset)).is_err() {
             return Self::empty_load_response(request.slot);
         }

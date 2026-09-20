@@ -138,7 +138,7 @@ impl ShadowCopyManager {
         active_pool_data: &mut [crate::voxel::format::Cell],
     ) -> bool {
         let cells_per_chunk = crate::voxel::format::CELLS_PER_CHUNK;
-
+        print!("src/manager/shadow_copy.rs execute_copy called");
         for dz in 0..WINDOW_SIDE {
             for dx in 0..WINDOW_SIDE {
                 let active_slot = dz * WINDOW_SIDE + dx;
@@ -171,7 +171,7 @@ impl ShadowCopyManager {
                     .copy_from_slice(&shadow_pool.data[src_start..src_end]);
             }
         }
-
+        print!("src/manager/shadow_copy.rs execute_copy done");
         true
     }
 
