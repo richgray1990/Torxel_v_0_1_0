@@ -26,12 +26,6 @@ pub fn initial_copy_system(
         return;
     }
 
-    // if pipeline.phase != ComputePhase::AwaitingPostSwap {
-    //     println!("[INITIAL_COPY] EXT: phase != AwaitingPostSwap");
-    //     return;
-    // }
-    
-    
     // ИСПРАВЛЕНИЕ: пропускаем Failed слоты
     let all_ready = (0..WINDOW_CHUNK_COUNT).all(|slot| {
         let state = manager.get_slot_state(slot);
@@ -39,7 +33,6 @@ pub fn initial_copy_system(
     });
 
     if !all_ready {
-        println!("[INITIAL_COPY] EXT: !all_ready");
         return;
     }
 
@@ -54,6 +47,14 @@ pub fn initial_copy_system(
 
     println!("[INITIAL_COPY] DONE! Copied {} chunks from WriteWorld to ReadWorld", copied);
 
+    // Сбрасываем render_notified для всех Ready чанков
+    // Чтобы dispatch_loaded_events_system отправил события на следующем кадре
+    for slot in 0..WINDOW_CHUNK_COUNT {
+        if manager.get_slot_state(slot) == SlotState::Ready {
+            manager.metadata[slot].set_render_notified(false);
+        }
+    }
+    
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;
 }

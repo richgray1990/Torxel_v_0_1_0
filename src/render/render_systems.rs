@@ -87,6 +87,13 @@ pub fn build_meshes_system(
         }
     }
 
+    for (key, data) in mesh_storage.subchunks.iter() {
+        if key.subchunk_index == 0 && data.current_mesh.is_none() && data.state == SubchunkRenderState::Ready {
+            println!("[DEBUG] sub0 without mesh: chunk=({},{}) state={:?} — SKIPPED (not Empty/Dirty)",
+                key.chunk_x, key.chunk_z, data.state);
+        }
+    }
+
     for key in to_build {
         let data = match mesh_storage.get_mut(&key) {
             Some(d) => d,
