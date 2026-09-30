@@ -17,6 +17,11 @@ use torxel::voxel::materials::ids::{AIR, BEDROCK, STONE, DIRT, GRASS, CLAY};
 use torxel::voxel::materials::phases::{SOLID, GAS};
 use torxel::io::file_format::{ChunkHeader, WorldHeader};
 
+const PYRAMID_HEIGHTS: [[usize; 2]; 2] = [
+    [1, 3],  // chunk (0,0)=3, chunk (0,1)=5
+    [5, 8],  // chunk (1,0)=1, chunk (1,1)=7
+];
+
 fn main() {
     let start_total = Instant::now();
 
@@ -88,16 +93,45 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
 
     for lz in 0..CHUNK_SIDE {
         for lx in 0..CHUNK_SIDE {
+
+            //let ph = quarter_pyramid_height(lx, lz, 7, chunk_x, chunk_z);
+            let ph = quarter_pyramid_height(lx, lz, 7, chunk_x, chunk_z);
+            
             for ly in 0..CHUNK_HEIGHT {
                 let cell_index = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
 
                 // Плоский мир: только stone на y=0, остальное воздух
                 let material = if ly == 0 {
                     STONE
+                } else if ly as i64 <= ph as i64 {
+                    CLAY
                 } else {
                     AIR
                 };
 
+                // Чанк (0,0): 4 башни в углах
+                if chunk_x == 0 && chunk_z == 0 {
+                    // // Угол (0,0): 1x1, высота 2
+                    set_tower(&mut cells, 0, 0, 1, 1, 2);
+                    // // Угол (0,15): 2x2, высота 3
+                    set_tower(&mut cells, 0, 15, 2, 2, 3);
+                    // // Угол (15,0): 3x3, высота 4
+                    set_tower(&mut cells, 15, 0, 3, 3, 4);
+                    // // Угол (15,15): 4x4, высота 5
+                    set_tower(&mut cells, 15, 15, 4, 4, 5);
+                }
+                // Чанк (1,1): 4 башни в углах
+                else if chunk_x == 0 && chunk_z == 1 {
+                    // Угол (0,0): 2x3, высота 6
+                    set_tower(&mut cells, 0, 0, 2, 3, 6);
+                    // Угол (0,15): 3x2, высота 7
+                    set_tower(&mut cells, 0, 15, 3, 2, 7);
+                    // Угол (15,0): 1x4, высота 8
+                    set_tower(&mut cells, 15, 0, 1, 4, 8);
+                    // Угол (15,15): 4x1, высота 9
+                    set_tower(&mut cells, 15, 15, 4, 1, 9);
+                }
+                
                 cells[cell_index].material_id = material;
                 cells[cell_index].phase_state = if material == AIR { GAS } else { SOLID };
 
@@ -114,6 +148,20 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
         }
     }
 
+    // // ОТЛАДКА: дамп углов после генерации
+    // if chunk_x >= 0 && chunk_x <= 1 && chunk_z >= 0 && chunk_z <= 1 {
+    //     println!("[GEN] Chunk ({},{}) corners:", chunk_x, chunk_z);
+    //     for (lx, lz, name) in [(0, 0, "corner(0,0)"), (15, 0, "corner(15,0)"), 
+    //                             (0, 15, "corner(0,15)"), (15, 15, "corner(15,15)")] {
+    //         print!("  {}: ", name);
+    //         for y in 1..8 {
+    //             let idx = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + y;
+    //             print!("y{}={} ", y, cells[idx].material_id);
+    //         }
+    //         println!();
+    //     }
+    // }
+
     let chunk_data_size = (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32;
     let mut header = ChunkHeader::new(chunk_data_size, CELLS_PER_CHUNK as u32);
     header.min_solid_y = min_solid;
@@ -124,6 +172,60 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
     (cells, header)
 }
 
-fn terrain_height(_x: i64, _z: i64) -> usize {
-    1
+fn set_tower(
+    cells: &mut [Cell],
+    corner_x: usize,
+    corner_z: usize,
+    size_x: usize,
+    size_z: usize,
+    height: usize,
+) {
+    for dz in 0..size_z {
+        for dx in 0..size_x {
+            let lx = if corner_x == 0 { dx } else { CHUNK_SIDE - 1 - dx };
+            let lz = if corner_z == 0 { dz } else { CHUNK_SIDE - 1 - dz };
+            
+            for ly in 1..=height {
+                if ly < CHUNK_HEIGHT {
+                    let idx = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
+                    cells[idx].material_id = CLAY;
+                    cells[idx].phase_state = SOLID;
+                }
+            }
+        }
+    }
+}
+
+/// Высота пирамидки в точке (wx, wz).
+/// Пирамидки стоят на УГЛАХ чанков (стык 4 чанков) чтобы
+/// проверить межчанковые боковые грани.
+fn quarter_pyramid_height(lx: usize, lz: usize, radius: usize, chunk_x: i64, chunk_z: i64) -> usize {
+    let new_radius: usize = ((chunk_x + chunk_z).rem_euclid(radius as i64) + 1) as usize;
+
+    // Расстояние до ближайшего угла чанка
+    let dx = lx.min(CHUNK_SIDE - 1 - lx);
+    let dz = lz.min(CHUNK_SIDE - 1 - lz);
+    let d = dx.max(dz);
+
+    if d < new_radius {
+        new_radius - d
+    } else {
+        0
+    }
+}
+
+//отладочный случай
+fn pyramid_height(lx: usize, lz: usize, chunk_x: i64, chunk_z: i64) -> usize {
+    if chunk_x > 1 || chunk_z > 1 {
+        return 0;
+    }
+    
+    let max_h = PYRAMID_HEIGHTS[chunk_z as usize][chunk_x as usize];
+    let radius = max_h;
+    
+    let dx = lx.min(CHUNK_SIDE - 1 - lx);
+    let dz = lz.min(CHUNK_SIDE - 1 - lz);
+    let d = dx.max(dz);
+    
+     if d < radius {max_h - d } else { 0 }
 }

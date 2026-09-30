@@ -99,7 +99,7 @@ pub fn build_subchunk_mesh(
                 if cell.material_id == ids::AIR {
                     continue;
                 }
-
+                
                 let material = match get_material(cell.material_id) {
                     Some(m) => m,
                     None => continue,
@@ -207,9 +207,26 @@ fn is_face_visible(
         let idx = (n_local_z as usize * CHUNK_SIDE + n_local_x as usize) * CHUNK_HEIGHT
             + neighbor_y as usize;
         let neighbor_cell = pool.get(n_slot, idx);
-        return is_transparent(neighbor_cell.material_id);
+        let visible = is_transparent(neighbor_cell.material_id);
+
+        // // +ЛОГ ДЛЯ ОТЛАДКИ ПРОБЛЕМНОГО БЛОКА
+        // if chunk_x == 0 && chunk_z == 1 && neighbor_z >= CHUNK_SIDE as i64 {
+        //     println!("[IS_FACE_VISIBLE_Z_OUT] current=({},{}) target=({},{}) norm=({},{})", 
+        //         chunk_x, chunk_z, n_chunk_x, n_chunk_z, norm_x, norm_z);
+        // }
+
+        //  // +ЛОГ ИНДЕКСА И МАТЕРИАЛА
+        // if chunk_x == 0 && chunk_z == 1 && neighbor_z >= CHUNK_SIDE as i64 {
+        //      let mat_check = pool.get(n_slot, idx);
+        //      println!("  -> Slot found: {}. Idx={} Mat={}", n_slot, idx, mat_check.material_id);
+        // }
+        
+        // if chunk_x == 0 && chunk_z == 1 && neighbor_z >= CHUNK_SIDE as i64 {
+        //      println!("  -> Visible result: {}", visible);
+        // }
+
+        return visible;
     }
 
-    // Соседний чанк не загружен — не рисуем грань
     false
 }

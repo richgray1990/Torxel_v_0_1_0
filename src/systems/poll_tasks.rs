@@ -51,10 +51,10 @@ pub fn poll_background_tasks_system(
 
         manager.set_slot_state(slot, SlotState::Ready);
 
-        println!(
-            "[LOAD] Chunk at ({}, {}) → slot {} READY",
-            staged_chunk.grid_x, staged_chunk.grid_z, staged_chunk.slot
-        );
+        // println!(
+        //     "[LOAD] Chunk at ({}, {}) → slot {} READY",
+        //     staged_chunk.grid_x, staged_chunk.grid_z, staged_chunk.slot
+        // );
     }
 
     // Применяем результаты сохранения

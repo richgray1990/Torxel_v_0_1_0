@@ -109,8 +109,8 @@ pub fn build_meshes_system(
             key.subchunk_index,
             &read_world.0,
             slot,
-            dimensions.width as i64,
-            dimensions.depth as i64,
+            key.chunk_x,//dimensions.width as i64,
+            key.chunk_z,//dimensions.depth as i64,
             &manager,
         );
 

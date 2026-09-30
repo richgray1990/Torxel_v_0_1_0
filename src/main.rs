@@ -6,7 +6,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(TorxelPlugin {
-            topology: TorusTopology::new(50, 60),
+            topology: TorusTopology::new(60, 60),
             world_path: std::path::PathBuf::from("world.bin"),
         })
         .add_systems(Startup, setup_camera)
