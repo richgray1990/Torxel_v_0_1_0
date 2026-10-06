@@ -2,18 +2,18 @@
 
 use bevy::prelude::*;
 
-use crate::manager::{ChunkManager, SlotState};
-use crate::queues::mesh_queue::MeshUpdateQueue;
-use crate::render::camera::CameraController;
-use crate::render::mesh_storage::{MeshStorage, SubchunkRenderState, SubchunkKey, };
-use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
-use crate::systems::initial_copy::InitialCopyDone;
-use crate::systems::update_window::WindowInitialized;
-use crate::voxel::format::{CELLS_PER_CHUNK, CHUNK_HEIGHT, CHUNK_SIDE, WINDOW_CHUNK_COUNT, WINDOW_SIDE, SUBCHUNKS_PER_CHUNK, WorldDimensions};
-use crate::voxel::materials::ids;
-use bevy::render::mesh::VertexAttributeValues;
-use crate::voxel::pool::{ReadWorld, WriteWorld};
-use crate::voxel::materials::is_transparent;
+// use crate::manager::{ChunkManager, SlotState};
+// use crate::queues::mesh_queue::MeshUpdateQueue;
+// use crate::render::camera::CameraController;
+// use crate::render::mesh_storage::{MeshStorage, SubchunkRenderState, SubchunkKey, };
+// use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
+// use crate::systems::initial_copy::InitialCopyDone;
+// use crate::systems::update_window::WindowInitialized;
+// use crate::voxel::format::{CELLS_PER_CHUNK, CHUNK_HEIGHT, CHUNK_SIDE, WINDOW_CHUNK_COUNT, WINDOW_SIDE, SUBCHUNKS_PER_CHUNK, WorldDimensions};
+// use crate::voxel::materials::ids;
+// use bevy::render::mesh::VertexAttributeValues;
+// use crate::voxel::pool::{ReadWorld, WriteWorld};
+// use crate::voxel::materials::is_transparent;
 
 /// Таймер печати отладки (раз в секунду)
 #[derive(Resource)]
@@ -28,19 +28,19 @@ impl Default for DebugTimer {
 pub fn debug_report_system(
     time: Res<Time>,
     mut timer: ResMut<DebugTimer>,
-    manager: Res<ChunkManager>,
-    read_world: Res<ReadWorld>,
-    write_world: Res<WriteWorld>,
-    mesh_storage: Res<MeshStorage>,
-    mesh_queue: Res<MeshUpdateQueue>,
-    meshes: Res<Assets<Mesh>>,
-    pipeline: Res<ComputePipeline>,
-    swap_signal: Res<SwapSignal>,
-    initialized: Res<WindowInitialized>,
-    initial_copy: Res<InitialCopyDone>,
-    controller: Res<CameraController>,
-    dimensions: Option<Res<WorldDimensions>>,
-    transforms: Query<&Transform>,
+    // manager: Res<ChunkManager>,
+    // read_world: Res<ReadWorld>,
+    // write_world: Res<WriteWorld>,
+    // mesh_storage: Res<MeshStorage>,
+    // mesh_queue: Res<MeshUpdateQueue>,
+    // meshes: Res<Assets<Mesh>>,
+    // pipeline: Res<ComputePipeline>,
+    // swap_signal: Res<SwapSignal>,
+    // initialized: Res<WindowInitialized>,
+    // initial_copy: Res<InitialCopyDone>,
+    // controller: Res<CameraController>,
+    // dimensions: Option<Res<WorldDimensions>>,
+    // transforms: Query<&Transform>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {

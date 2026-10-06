@@ -19,7 +19,7 @@ use crate::io::file_format::WorldHeader;
 use crate::io::staging::{ActiveStagingBuffer, ShadowStagingBuffer};
 use crate::io::worker::IoWorker;
 use crate::manager::{
-    ChunkManager, ShadowCopyManager, SlotMetadata, SlotState,
+    ChunkManager, ShadowCopyManager, //SlotMetadata, SlotState,
 };
 use crate::queues::cell_events::CellEventQueue;
 use crate::queues::mesh_queue::MeshUpdateQueue;

@@ -3,12 +3,13 @@
 use bevy::prelude::*;
 
 use crate::manager::ChunkManager;
-use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue};
+use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue};   //-MeshUpdateEvent
 use crate::render::camera::CameraController;
 use crate::render::mesh_builder::build_subchunk_mesh;
 use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState};
 use crate::voxel::format::{
-    CHUNK_HEIGHT, CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
+    //CHUNK_HEIGHT,
+    CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
     SUBCHUNK_SIDE, SUBCHUNK_HEIGHT, WorldDimensions,
 };
 use crate::voxel::pool::ReadWorld;
@@ -77,7 +78,7 @@ pub fn build_meshes_system(
     mut meshes: ResMut<Assets<Mesh>>,
     read_world: Res<ReadWorld>,
     manager: Res<ChunkManager>,
-    dimensions: Res<WorldDimensions>,
+    //dimensions: Res<WorldDimensions>,
 ) {
     let mut to_build: Vec<SubchunkKey> = Vec::new();
 

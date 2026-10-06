@@ -4,17 +4,17 @@ use bevy::prelude::*;
 
 use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::pool::ReadWorld;
-use crate::io::channels::{IoManager, SaveRequest};
+use crate::io::channels::{SaveRequest}; //-IoManager
 use crate::manager::{ChunkManager, SlotState};
 
-/// Задержка выгрузки в кадрах
-const UNLOAD_DELAY_FRAMES: u32 = 60;
+// /// Задержка выгрузки в кадрах
+// const UNLOAD_DELAY_FRAMES: u32 = 60;
 
 /// Система сборки мусора
 pub fn chunk_garbage_collector_system(
     mut manager: ResMut<ChunkManager>,
     read_world: Res<ReadWorld>,
-    io_manager: Res<IoManager>,
+    //io_manager: Res<IoManager>,
 ) {
     for slot in 0..POOL_CHUNK_COUNT {
         let meta = &manager.metadata[slot];

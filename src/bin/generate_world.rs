@@ -13,14 +13,9 @@ use std::path::PathBuf;
 use bytemuck::Zeroable;
 
 use torxel::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, CELLS_PER_CHUNK};
-use torxel::voxel::materials::ids::{AIR, BEDROCK, STONE, DIRT, GRASS, CLAY};
+use torxel::voxel::materials::ids::{AIR, STONE, CLAY};
 use torxel::voxel::materials::phases::{SOLID, GAS};
 use torxel::io::file_format::{ChunkHeader, WorldHeader};
-
-const PYRAMID_HEIGHTS: [[usize; 2]; 2] = [
-    [1, 3],  // chunk (0,0)=3, chunk (0,1)=5
-    [5, 8],  // chunk (1,0)=1, chunk (1,1)=7
-];
 
 fn main() {
     let start_total = Instant::now();
@@ -88,8 +83,8 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
     let mut cells = vec![Cell::zeroed(); CELLS_PER_CHUNK];
     let mut min_solid = CHUNK_HEIGHT as u16;
     let mut max_solid = 0u16;
-    let mut min_liquid = CHUNK_HEIGHT as u16;
-    let mut max_liquid = 0u16;
+    let min_liquid = CHUNK_HEIGHT as u16;
+    let max_liquid = 0u16;
 
     for lz in 0..CHUNK_SIDE {
         for lx in 0..CHUNK_SIDE {
@@ -212,20 +207,4 @@ fn quarter_pyramid_height(lx: usize, lz: usize, radius: usize, chunk_x: i64, chu
     } else {
         0
     }
-}
-
-//отладочный случай
-fn pyramid_height(lx: usize, lz: usize, chunk_x: i64, chunk_z: i64) -> usize {
-    if chunk_x > 1 || chunk_z > 1 {
-        return 0;
-    }
-    
-    let max_h = PYRAMID_HEIGHTS[chunk_z as usize][chunk_x as usize];
-    let radius = max_h;
-    
-    let dx = lx.min(CHUNK_SIDE - 1 - lx);
-    let dz = lz.min(CHUNK_SIDE - 1 - lz);
-    let d = dx.max(dz);
-    
-     if d < radius {max_h - d } else { 0 }
 }

@@ -50,7 +50,7 @@ pub fn swap_pointers_system(
 pub fn post_swap_copy_system(
     read_world: Res<ReadWorld>,
     mut write_world: ResMut<WriteWorld>,
-    mut manager: ResMut<ChunkManager>,
+    manager: ResMut<ChunkManager>,
     mut dirty_buffer: ResMut<PostSwapDirtyBuffer>,
     mut pipeline: ResMut<ComputePipeline>,
 ) {
