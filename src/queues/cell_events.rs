@@ -1,5 +1,4 @@
 //! Очередь событий изменений ячеек (границы чанков, физика).
-
 use bevy::prelude::*;
 use smallvec::SmallVec;
 
@@ -25,6 +24,46 @@ pub struct CellEvent {
     pub slot_index: usize,
     pub cell_index: usize,
     pub cell: Cell,
+    /// Если `Some`, событие применяется только когда текущий `generation` чанка совпадает.
+    ///
+    /// `None` — доверенное событие:
+    /// - начальный тест;
+    /// - системное редактирование без снапшота;
+    /// - загрузчик, если он когда-нибудь будет писать через события.
+    ///
+    /// `Some(gen)` — событие рассчитывалось по снапшоту с поколением `gen`.
+    pub expected_generation: Option<u64>,
+}
+
+impl CellEvent {
+    /// Удобный конструктор для доверенного SetCell без проверки поколения.
+    #[inline]
+    pub fn set_cell(slot_index: usize, cell_index: usize, cell: Cell) -> Self {
+        Self {
+            kind: CellEventKind::SetCell,
+            slot_index,
+            cell_index,
+            cell,
+            expected_generation: None,
+        }
+    }
+
+    /// Удобный конструктор для SetCell с проверкой поколения.
+    #[inline]
+    pub fn set_cell_expected(
+        slot_index: usize,
+        cell_index: usize,
+        cell: Cell,
+        expected_generation: u64,
+    ) -> Self {
+        Self {
+            kind: CellEventKind::SetCell,
+            slot_index,
+            cell_index,
+            cell,
+            expected_generation: Some(expected_generation),
+        }
+    }
 }
 
 /// Очередь событий ячеек

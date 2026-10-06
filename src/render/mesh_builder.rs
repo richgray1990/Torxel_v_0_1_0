@@ -9,6 +9,8 @@ use crate::voxel::format::{
 use crate::voxel::materials::{get_material, ids, is_transparent};
 use crate::voxel::pool::ChunkPool;
 
+use crate::manager::ReadWindowManager;
+
 pub const MAX_VERTICES_PER_SUBCHUNK: usize =
     SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 4;
 
@@ -82,7 +84,7 @@ pub fn build_subchunk_mesh(
     slot: usize,
     chunk_x: i64,
     chunk_z: i64,
-    manager: &crate::manager::ChunkManager,
+    window: &ReadWindowManager,
 ) -> SubchunkMeshData {
     let mut mesh_data = SubchunkMeshData::new();
 
@@ -114,7 +116,7 @@ pub fn build_subchunk_mesh(
                         nx, ny, nz,
                         pool, slot,
                         chunk_x, chunk_z,
-                        manager,
+                        window,
                     );
 
                     if visible {
@@ -159,12 +161,13 @@ fn is_face_visible(
     slot: usize,
     chunk_x: i64,
     chunk_z: i64,
-    manager: &crate::manager::ChunkManager,
+    window: &ReadWindowManager,
 ) -> bool {
     // Проверка по Y
     if neighbor_y < 0 {
         return false;
     }
+
     if neighbor_y >= CHUNK_HEIGHT as i64 {
         return true;
     }
@@ -202,8 +205,8 @@ fn is_face_visible(
     }
 
     // Сосед в другом чанке — ищем слот через менеджер
-    let (norm_x, norm_z) = manager.topology.normalize_chunk(n_chunk_x, n_chunk_z);
-    if let Some(n_slot) = manager.slot_for_chunk(norm_x as usize, norm_z as usize) {
+    let (norm_x, norm_z) = window.topology.normalize_chunk(n_chunk_x, n_chunk_z);
+    if let Some(n_slot) = window.slot_for_chunk(norm_x as usize, norm_z as usize) {
         let idx = (n_local_z as usize * CHUNK_SIDE + n_local_x as usize) * CHUNK_HEIGHT
             + neighbor_y as usize;
         let neighbor_cell = pool.get(n_slot, idx);
@@ -228,5 +231,5 @@ fn is_face_visible(
         return visible;
     }
 
-    false
+    true    //признак видмости на границе активного окна
 }

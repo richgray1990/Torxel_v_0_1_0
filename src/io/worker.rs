@@ -11,8 +11,7 @@ use bytemuck::Zeroable;
 
 use crate::voxel::format::{Cell, CELLS_PER_CHUNK};
 use super::channels::{
-    LoadRequest, LoadResponse, SaveRequest, SaveResponse,
-    ShadowLoadRequest, ShadowLoadResponse, WorkerChannels,
+    LoadRequest, LoadResponse, SaveRequest, SaveResponse, WorkerChannels,
 };
 use super::file_format::{ChunkHeader, WorldHeader};
 
@@ -86,14 +85,6 @@ impl IoWorker {
                 channels.save_response_sender.send(response).ok();
             }
 
-            // Приоритет 3: теневые запросы на загрузку
-            while let Ok(request) = channels.shadow_load_receiver.try_recv() {
-                let response = Self::handle_shadow_load_request(
-                    &mut file, &header, header_size, chunk_total_size, request,
-                );
-                channels.shadow_load_response_sender.send(response).ok();
-            }
-
             thread::sleep(std::time::Duration::from_millis(1));
         }
 
@@ -144,71 +135,6 @@ impl IoWorker {
                 success: true,
             },
             Err(_) => Self::empty_load_response(request.slot),
-        }
-    }
-
-    fn handle_shadow_load_request(
-        file: &mut File,
-        header: &WorldHeader,
-        header_size: u64,
-        chunk_total_size: u64,
-        request: ShadowLoadRequest,
-    ) -> ShadowLoadResponse {
-        let chunk_index =
-            (request.chunk_z * header.chunks_x as usize + request.chunk_x) as u64;
-        let offset = header_size + chunk_index * chunk_total_size;
-
-        if file.seek(SeekFrom::Start(offset)).is_err() {
-            return ShadowLoadResponse {
-                slot: request.slot,
-                chunk_x: request.chunk_x as i64,
-                chunk_z: request.chunk_z as i64,
-                data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
-                success: false,
-            };
-        }
-
-        // Пропускаем заголовок чанка (32 байта)
-        let mut chunk_header_bytes = [0u8; 32];
-        if file.read_exact(&mut chunk_header_bytes).is_err() {
-            return ShadowLoadResponse {
-                slot: request.slot,
-                chunk_x: request.chunk_x as i64,
-                chunk_z: request.chunk_z as i64,
-                data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
-                success: false,
-            };
-        }
-
-        let chunk_header: &ChunkHeader = bytemuck::from_bytes(&chunk_header_bytes);
-        if !chunk_header.is_valid() {
-            return ShadowLoadResponse {
-                slot: request.slot,
-                chunk_x: request.chunk_x as i64,
-                chunk_z: request.chunk_z as i64,
-                data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
-                success: false,
-            };
-        }
-
-        let mut data = vec![Cell::zeroed(); CELLS_PER_CHUNK];
-        let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut data);
-
-        match file.read_exact(bytes) {
-            Ok(_) => ShadowLoadResponse {
-                slot: request.slot,
-                chunk_x: request.chunk_x as i64,
-                chunk_z: request.chunk_z as i64,
-                data,
-                success: true,
-            },
-            Err(_) => ShadowLoadResponse {
-                slot: request.slot,
-                chunk_x: request.chunk_x as i64,
-                chunk_z: request.chunk_z as i64,
-                data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
-                success: false,
-            },
         }
     }
 

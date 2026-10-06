@@ -9,8 +9,6 @@ pub enum MeshUpdateKind {
     ChunkLoaded,
     ChunkDirty,
     ChunkUnloaded,
-    ShadowChunkLoaded,
-    ShadowChunkUnloaded,
 }
 
 
@@ -18,7 +16,6 @@ pub enum MeshUpdateKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderSource {
     Active,
-    Shadow,
 }
 
 /// Событие обновления меша

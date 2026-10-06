@@ -12,27 +12,24 @@ use crate::render::render_systems::{
 };
 
 use crate::voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
-use crate::voxel::shadow_pool::ShadowPool;
 use crate::voxel::topology::TorusTopology;
 use crate::io::channels::IoManager;
 use crate::io::file_format::WorldHeader;
-use crate::io::staging::{ActiveStagingBuffer, ShadowStagingBuffer};
+use crate::io::staging::{ActiveStagingBuffer};
 use crate::io::worker::IoWorker;
 use crate::manager::{
-    ChunkManager, ShadowCopyManager, //SlotMetadata, SlotState,
+    ChunkManager, ExclusivePoolRegistry, ReadWindowManager, //SlotMetadata, SlotState,
 };
 use crate::queues::cell_events::CellEventQueue;
 use crate::queues::mesh_queue::MeshUpdateQueue;
-use crate::queues::shadow_requests::ShadowRequestBuffer;
 use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePipeline, SwapSignal};
 use crate::systems::{
     apply_cell_events_system, chunk_garbage_collector_system, dispatch_dirty_events_system,
     dispatch_loaded_events_system,
     initial_copy_system, initialize_window_system, poll_background_tasks_system,
-    poll_shadow_tasks_system, post_swap_copy_system, process_shadow_requests_system,
-    request_swap_system, shadow_copy_system, shadow_gc_system,
-    swap_pointers_system, update_window_system, InitialCopyDone, WindowInitialized,
+    post_swap_copy_system, request_swap_system, swap_pointers_system, update_window_system,
+    InitialCopyDone, WindowInitialized,
 };
 use crate::systems::debug::{debug_report_system, DebugTimer};
 
@@ -45,8 +42,6 @@ pub enum GameFlowSet {
     InitialCopy,
     /// Фаза обновления (параллельно: окно + теневые запросы)
     UpdatePhase,
-    /// Копирование из теневого пула в активный
-    ShadowCopy,
     /// Обмен указателей активного пула
     SwapPointers,
     /// Передача событий рендеру о загрузке чанков
@@ -65,14 +60,12 @@ pub enum GameFlowSet {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PollPhaseSet {
     PollTasks,
-    PollShadowTasks,
 }
 
 /// Системные сеты внутри UpdatePhase (параллельно)
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UpdatePhaseSet {
     UpdateWindow,
-    ShadowRequests,
 }
 
 /// Системные сеты внутри ParallelWork (параллельные ветки)
@@ -100,7 +93,6 @@ pub enum ComputeBlockSet {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GCPhaseSet {
     GarbageCollect,
-    ShadowGarbageCollect,
 }
 
 /// Плагин менеджера чанков
@@ -122,22 +114,27 @@ impl Plugin for TorxelPlugin {
 
         // Регистрация ресурсов
         app.insert_resource(ChunkManager::new(self.topology.clone()));
+        app.insert_resource(ReadWindowManager::new(&self.topology));
+
         app.insert_resource(ReadWorld(ChunkPool::new_max()));
         app.insert_resource(WriteWorld(ChunkPool::new_max()));
-        app.insert_resource(ShadowPool::new(self.topology.clone()));
+        
+        
         app.insert_resource(ComputePipeline::default());
         app.insert_resource(io_manager);
         app.insert_resource(header);
         app.init_resource::<SwapSignal>();
         app.init_resource::<MeshUpdateQueue>();
         app.init_resource::<CellEventQueue>();
-        app.init_resource::<ShadowRequestBuffer>();
+        
         app.init_resource::<PostSwapDirtyBuffer>();
         app.init_resource::<ActiveStagingBuffer>();
-        app.init_resource::<ShadowStagingBuffer>();
+        
         app.init_resource::<WindowInitialized>();
         app.init_resource::<InitialCopyDone>();
-        app.init_resource::<ShadowCopyManager>();
+
+        app.insert_resource(ExclusivePoolRegistry::new(8, 32));
+        
         app.init_resource::<CameraController>();
         app.init_resource::<MeshStorage>();
         app.init_resource::<DebugTimer>();
@@ -151,7 +148,7 @@ impl Plugin for TorxelPlugin {
                 GameFlowSet::PollPhase,
                 GameFlowSet::InitialCopy,
                 GameFlowSet::UpdatePhase,
-                GameFlowSet::ShadowCopy,
+                
                 GameFlowSet::SwapPointers,
                 GameFlowSet::DispatchLoadedEvents,
                 GameFlowSet::DispatchDirtyEvents,
@@ -167,7 +164,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
         app.configure_sets(
             Update,
-            (PollPhaseSet::PollTasks, PollPhaseSet::PollShadowTasks)
+            (PollPhaseSet::PollTasks)
                 .in_set(GameFlowSet::PollPhase),
         );
 
@@ -176,7 +173,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
         app.configure_sets(
             Update,
-            (UpdatePhaseSet::UpdateWindow, UpdatePhaseSet::ShadowRequests)
+            (UpdatePhaseSet::UpdateWindow)
                 .in_set(GameFlowSet::UpdatePhase),
         );
 
@@ -214,7 +211,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
         app.configure_sets(
             Update,
-            (GCPhaseSet::GarbageCollect, GCPhaseSet::ShadowGarbageCollect)
+            (GCPhaseSet::GarbageCollect)
                 .in_set(GameFlowSet::GCPhase),
         );
 
@@ -230,11 +227,7 @@ impl Plugin for TorxelPlugin {
             Update,
             poll_background_tasks_system.in_set(PollPhaseSet::PollTasks),
         );
-        app.add_systems(
-            Update,
-            poll_shadow_tasks_system.in_set(PollPhaseSet::PollShadowTasks),
-        );
-
+        
         // InitialCopy
         app.add_systems(
             Update,
@@ -246,11 +239,7 @@ impl Plugin for TorxelPlugin {
             Update,
             update_window_system.in_set(UpdatePhaseSet::UpdateWindow),
         );
-        app.add_systems(
-            Update,
-            process_shadow_requests_system.in_set(UpdatePhaseSet::ShadowRequests),
-        );
-
+        
         // SwapPointers
         app.add_systems(
             Update,
@@ -310,15 +299,7 @@ impl Plugin for TorxelPlugin {
             Update,
             chunk_garbage_collector_system.in_set(GCPhaseSet::GarbageCollect),
         );
-        app.add_systems(
-            Update,
-            shadow_gc_system.in_set(GCPhaseSet::ShadowGarbageCollect),
-        );
-        app.add_systems(
-            Update,
-            shadow_copy_system.in_set(GameFlowSet::ShadowCopy),
-        );
-
+        
         app.add_systems(Update, debug_report_system);
     }
 }

@@ -41,15 +41,18 @@ pub fn poll_background_tasks_system(
     // Применяем загруженные чанки к WriteWorld
     for staged_chunk in staging.take_loaded() {
         let slot = staged_chunk.slot;
-
         write_world.0.chunk_slice_mut(slot).copy_from_slice(&staged_chunk.data);
-
         manager.metadata[slot].min_solid_y = staged_chunk.min_solid_y;
         manager.metadata[slot].max_solid_y = staged_chunk.max_solid_y;
         manager.metadata[slot].min_liquid_y = staged_chunk.min_liquid_y;
         manager.metadata[slot].max_liquid_y = staged_chunk.max_liquid_y;
-
         manager.set_slot_state(slot, SlotState::Ready);
+
+        // Новый чанк в слоте — generation начинаем с нуля.
+        manager.metadata[slot].generation = 0;
+
+        // Просим swap, чтобы чанк попал в ReadWorld.
+        manager.set_pending_b_dirty(slot, true);
 
         // println!(
         //     "[LOAD] Chunk at ({}, {}) → slot {} READY",

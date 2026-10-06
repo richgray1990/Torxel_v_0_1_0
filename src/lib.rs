@@ -17,13 +17,9 @@ pub use voxel::format::{
 };
 pub use voxel::topology::TorusTopology;
 pub use voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
-pub use voxel::shadow_pool::{
-    ShadowPool, ShadowSlotState, ShadowRequestResult,
-    SHADOW_POOL_SIDE, SHADOW_SLOT_COUNT,
-};
+
 pub use manager::{
-    ChunkManager, SlotMetadata, SlotState,
-    ShadowCopyManager, ShadowCopyState, ShadowCopyValidation,
+    ChunkManager, SlotMetadata, SlotState
 };
 pub use plugin::{
     ComputeBlockSet, GameFlowSet, GCPhaseSet, ParallelWorkSet, PollPhaseSet,
@@ -31,5 +27,5 @@ pub use plugin::{
 };
 pub use signals::{ComputePhase, ComputePipeline, SwapSignal};
 pub use io::file_format::WorldHeader;
-pub use io::staging::{ActiveStagingBuffer, ShadowStagingBuffer};
+pub use io::staging::{ActiveStagingBuffer};
 pub use queues::PostSwapDirtyBuffer;

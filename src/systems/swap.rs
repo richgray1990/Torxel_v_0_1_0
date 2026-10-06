@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 use crate::manager::masks::DirtyMask;
-use crate::manager::ChunkManager;
+use crate::manager::{ChunkManager, ReadWindowManager};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, RenderSource};
 use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
@@ -20,6 +20,7 @@ pub fn swap_pointers_system(
     mut signal: ResMut<SwapSignal>,
     mut pipeline: ResMut<ComputePipeline>,
     manager: Res<ChunkManager>,
+    mut read_window: ResMut<ReadWindowManager>,
 ) {
     if !signal.requested {
         return;
@@ -31,8 +32,11 @@ pub fn swap_pointers_system(
         return;
     }
 
-    // Обмен указателей — ~2 наносекунды
+    // Обмен указателей пулов
     std::mem::swap(&mut read_world.0, &mut write_world.0);
+
+    // Публикуем read-снапшот метаданных
+    read_window.publish_from(&manager);
 
     // Свап состоялся, рендер уже может читать новые данные
     signal.requested = false;
@@ -43,14 +47,14 @@ pub fn swap_pointers_system(
 ///
 /// Подготовка WriteWorld к следующему кадру обсчёта.
 /// Работает параллельно с рендером:
-/// - Рендер читает Res<ReadWorld> + ResMut<MeshUpdateQueue>
-/// - Мы читаем Res<ReadWorld> + пишем ResMut<WriteWorld> + ResMut<PostSwapDirtyBuffer>
+/// - Рендер читает Res<ReadWorld> + Res<ReadWindowManager>
+/// - Мы читаем Res<ReadWorld> + пишем ResMut<WriteWorld> + ResMut<ChunkManager>
 ///
 /// Конфликта ресурсов нет — ветки параллельны.
 pub fn post_swap_copy_system(
     read_world: Res<ReadWorld>,
     mut write_world: ResMut<WriteWorld>,
-    manager: ResMut<ChunkManager>,
+    mut manager: ResMut<ChunkManager>,
     mut dirty_buffer: ResMut<PostSwapDirtyBuffer>,
     mut pipeline: ResMut<ComputePipeline>,
 ) {
@@ -61,6 +65,7 @@ pub fn post_swap_copy_system(
 
     // Собираем грязные слоты
     let mut dirty_mask = DirtyMask::new();
+
     for i in 0..POOL_CHUNK_COUNT {
         if manager.is_pending_b_dirty(i) {
             dirty_mask.set(i);
@@ -73,8 +78,8 @@ pub fn post_swap_copy_system(
         write_world.0.copy_chunk_from(&read_world.0, i);
 
         // Забираем маску грязных субчанков и сбрасываем
-        let sub_mask = manager.metadata[i].take_dirty_subchunks();   // ← добавить эту строку
-        
+        let sub_mask = manager.metadata[i].take_dirty_subchunks();
+
         dirty_buffer.push(MeshUpdateEvent {
             kind: MeshUpdateKind::ChunkDirty,
             slot_index: i,

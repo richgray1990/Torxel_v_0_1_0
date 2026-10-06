@@ -3,9 +3,13 @@
 pub mod metadata;
 pub mod manager;
 pub mod masks;
-pub mod shadow_copy;
+pub mod window;
+pub mod exclusive_pool;
 
 pub use metadata::{SlotMetadata, SlotState};
 pub use manager::ChunkManager;
-pub use masks::{DirtyMask, ShadowMask};
-pub use shadow_copy::{ShadowCopyManager, ShadowCopyState, ShadowCopyValidation};
+pub use masks::{DirtyMask};
+pub use window::{ReadSlotSnapshot, ReadWindowManager};
+pub use exclusive_pool::{
+    ExclusivePoolRegistry, LeaseBuffer, LeaseError, LeaseId, LeaseMode, LeaseOwner, LeaseState,
+};

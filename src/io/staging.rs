@@ -1,7 +1,5 @@
 //! Буферы для безопасной передачи данных из фонового потока в главный.
 //!
-//! Разделены на два ресурса для параллельной работы
-//! активного и теневого пулов.
 
 use bevy::prelude::*;
 
@@ -18,14 +16,6 @@ pub struct StagedChunk {
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
-}
-
-/// Загруженный чанк теневого пула
-pub struct ShadowStagedChunk {
-    pub slot: usize,
-    pub chunk_x: i64,
-    pub chunk_z: i64,
-    pub data: Vec<Cell>,
 }
 
 /// Буфер активного пула
@@ -50,21 +40,5 @@ impl ActiveStagingBuffer {
 
     pub fn push_saved(&mut self, response: SaveResponse) {
         self.saved_chunks.push(response);
-    }
-}
-
-/// Буфер теневого пула
-#[derive(Resource, Default)]
-pub struct ShadowStagingBuffer {
-    pub loaded_chunks: Vec<ShadowStagedChunk>,
-}
-
-impl ShadowStagingBuffer {
-    pub fn take_loaded(&mut self) -> Vec<ShadowStagedChunk> {
-        std::mem::take(&mut self.loaded_chunks)
-    }
-
-    pub fn push_loaded(&mut self, chunk: ShadowStagedChunk) {
-        self.loaded_chunks.push(chunk);
     }
 }

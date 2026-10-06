@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use crate::manager::ChunkManager;
+use crate::manager::ReadWindowManager;
 use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue};   //-MeshUpdateEvent
 use crate::render::camera::CameraController;
 use crate::render::mesh_builder::build_subchunk_mesh;
@@ -21,7 +21,7 @@ pub fn process_mesh_events_system(
 ) {
     for event in mesh_queue.events.iter() {
         match event.kind {
-            MeshUpdateKind::ChunkLoaded | MeshUpdateKind::ShadowChunkLoaded => {
+            MeshUpdateKind::ChunkLoaded => {
                 for sub_idx in 0..SUBCHUNKS_PER_CHUNK {
                     let key = SubchunkKey {
                         chunk_x: event.grid_x,
@@ -53,7 +53,7 @@ pub fn process_mesh_events_system(
                 }
             }
 
-            MeshUpdateKind::ChunkUnloaded | MeshUpdateKind::ShadowChunkUnloaded => {
+            MeshUpdateKind::ChunkUnloaded => {
                 for sub_idx in 0..SUBCHUNKS_PER_CHUNK {
                     let key = SubchunkKey {
                         chunk_x: event.grid_x,
@@ -77,7 +77,7 @@ pub fn build_meshes_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut meshes: ResMut<Assets<Mesh>>,
     read_world: Res<ReadWorld>,
-    manager: Res<ChunkManager>,
+    read_window: Res<ReadWindowManager>,
     //dimensions: Res<WorldDimensions>,
 ) {
     let mut to_build: Vec<SubchunkKey> = Vec::new();
@@ -101,7 +101,7 @@ pub fn build_meshes_system(
             None => continue,
         };
 
-        let slot = match find_chunk_slot(&manager, key.chunk_x, key.chunk_z) {
+        let slot = match find_chunk_slot(&read_window, key.chunk_x, key.chunk_z) {
             Some(s) => s,
             None => continue,
         };
@@ -112,7 +112,7 @@ pub fn build_meshes_system(
             slot,
             key.chunk_x,//dimensions.width as i64,
             key.chunk_z,//dimensions.depth as i64,
-            &manager,
+            &read_window,
         );
 
         // ИСПРАВЛЕНИЕ: Не создаём меш если нет вершин
@@ -272,13 +272,7 @@ pub fn cleanup_mesh_entities_system(
     }
 }
 
-fn find_chunk_slot(manager: &ChunkManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {
-    for slot in manager.active_window_slots() {
-        if let Some((cx, cz)) = manager.slot_to_chunk_coords(slot) {
-            if cx == chunk_x && cz == chunk_z {
-                return Some(slot);
-            }
-        }
-    }
-    None
+fn find_chunk_slot(window: &ReadWindowManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {
+    let (cx, cz) = window.normalize_chunk(chunk_x, chunk_z);
+    window.slot_for_chunk(cx, cz)
 }

@@ -85,28 +85,41 @@ impl ChunkManager {
     }
 
     #[inline(always)]
-    pub fn set_slot_state(&self, slot: usize, state: SlotState) {
+    pub fn set_slot_state(&mut self, slot: usize, state: SlotState) {
         self.metadata[slot].set_state(state);
     }
 
     #[inline(always)]
     pub fn is_pending_b_dirty(&self, slot: usize) -> bool {
-        self.metadata[slot].pending_b_dirty.load(std::sync::atomic::Ordering::Acquire)
+        self.metadata[slot].pending_b_dirty
     }
 
     #[inline(always)]
-    pub fn set_pending_b_dirty(&self, slot: usize, dirty: bool) {
-        self.metadata[slot].pending_b_dirty.store(dirty, std::sync::atomic::Ordering::Release);
+    pub fn set_pending_b_dirty(&mut self, slot: usize, dirty: bool) {
+        self.metadata[slot].pending_b_dirty = dirty;
     }
 
     #[inline(always)]
     pub fn is_file_dirty(&self, slot: usize) -> bool {
-        self.metadata[slot].file_dirty.load(std::sync::atomic::Ordering::Acquire)
+        self.metadata[slot].file_dirty
     }
 
     #[inline(always)]
-    pub fn set_file_dirty(&self, slot: usize, dirty: bool) {
-        self.metadata[slot].file_dirty.store(dirty, std::sync::atomic::Ordering::Release);
+    pub fn set_file_dirty(&mut self, slot: usize, dirty: bool) {
+        self.metadata[slot].file_dirty = dirty;
+    }
+
+    #[inline(always)]
+    pub fn mark_subchunk_dirty(&mut self, slot: usize, subchunk_idx: usize) {
+        self.metadata[slot].mark_subchunk_dirty(subchunk_idx);
+    }
+
+    /// Помечает чанк изменённым. Вызывать один раз на чанк за кадр, а не на каждую ячейку.
+    #[inline(always)]
+    pub fn touch_slot(&mut self, slot: usize) {
+        let meta = &mut self.metadata[slot];
+        meta.generation = meta.generation.wrapping_add(1);
+        meta.pending_b_dirty = true;
     }
 
     /// Проверка: есть ли хоть один слот в состоянии Saving
@@ -136,7 +149,7 @@ impl ChunkManager {
 
     /// Запись ячейки в пул записи
     pub fn write_cell(
-        &self,
+        &mut self,
         write_world: &mut ChunkPool,
         x: i64,
         y: i64,

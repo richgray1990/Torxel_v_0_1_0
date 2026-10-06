@@ -41,24 +41,6 @@ pub struct SaveResponse {
     pub success: bool,
 }
 
-/// Запрос на загрузку теневого чанка
-#[derive(Clone, Debug)]
-pub struct ShadowLoadRequest {
-    pub slot: usize,
-    pub chunk_x: usize,
-    pub chunk_z: usize,
-}
-
-/// Ответ на загрузку теневого чанка
-#[derive(Clone, Debug)]
-pub struct ShadowLoadResponse {
-    pub slot: usize,
-    pub chunk_x: i64,
-    pub chunk_z: i64,
-    pub data: Vec<Cell>,
-    pub success: bool,
-}
-
 /// Менеджер каналов I/O
 #[derive(Resource)]
 pub struct IoManager {
@@ -67,10 +49,6 @@ pub struct IoManager {
     pub load_response_receiver: Receiver<LoadResponse>,
     pub save_sender: Sender<SaveRequest>,
     pub save_response_receiver: Receiver<SaveResponse>,
-
-    // Теневые каналы
-    pub shadow_load_sender: Sender<ShadowLoadRequest>,
-    pub shadow_load_response_receiver: Receiver<ShadowLoadResponse>,
 }
 
 impl IoManager {
@@ -79,16 +57,12 @@ impl IoManager {
         let (load_response_sender, load_response_receiver) = flume::unbounded();
         let (save_sender, save_receiver) = flume::unbounded();
         let (save_response_sender, save_response_receiver) = flume::unbounded();
-        let (shadow_load_sender, shadow_load_receiver) = flume::unbounded();
-        let (shadow_load_response_sender, shadow_load_response_receiver) = flume::unbounded();
 
         let manager = Self {
             load_sender,
             load_response_receiver,
             save_sender,
             save_response_receiver,
-            shadow_load_sender,
-            shadow_load_response_receiver,
         };
 
         let worker_channels = WorkerChannels {
@@ -96,8 +70,6 @@ impl IoManager {
             load_response_sender,
             save_receiver,
             save_response_sender,
-            shadow_load_receiver,
-            shadow_load_response_sender,
         };
 
         (manager, worker_channels)
@@ -111,10 +83,6 @@ impl IoManager {
         self.save_sender.send(request).ok();
     }
 
-    pub fn queue_shadow_load(&self, request: ShadowLoadRequest) {
-        self.shadow_load_sender.send(request).ok();
-    }
-
     pub fn try_recv_load_response(&self) -> Option<LoadResponse> {
         self.load_response_receiver.try_recv().ok()
     }
@@ -123,9 +91,6 @@ impl IoManager {
         self.save_response_receiver.try_recv().ok()
     }
 
-    pub fn try_recv_shadow_load_response(&self) -> Option<ShadowLoadResponse> {
-        self.shadow_load_response_receiver.try_recv().ok()
-    }
 }
 
 /// Каналы для фонового воркера
@@ -134,6 +99,4 @@ pub struct WorkerChannels {
     pub load_response_sender: Sender<LoadResponse>,
     pub save_receiver: Receiver<SaveRequest>,
     pub save_response_sender: Sender<SaveResponse>,
-    pub shadow_load_receiver: Receiver<ShadowLoadRequest>,
-    pub shadow_load_response_sender: Sender<ShadowLoadResponse>,
 }

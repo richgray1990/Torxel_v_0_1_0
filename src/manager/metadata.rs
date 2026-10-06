@@ -1,6 +1,7 @@
 //! Метаданные слотов.
-
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+//!
+//! Без Atomic, без скрытой мутабельности.
+//! Мутация только через &mut self.
 
 use crate::voxel::format::CHUNK_HEIGHT;
 
@@ -19,101 +20,83 @@ pub enum SlotState {
 
 /// Метаданные одного слота
 pub struct SlotMetadata {
-    pub state: AtomicU8,
+    pub state: SlotState,
     pub grid_x: i64,
     pub grid_z: i64,
-    pub file_dirty: AtomicBool,
-    pub pending_b_dirty: AtomicBool,
-    pub is_active: AtomicBool,
-    pub is_shadow: AtomicBool,
-    pub unload_timer: AtomicU32,
+    pub file_dirty: bool,
+    pub pending_b_dirty: bool,
+    pub is_active: bool,
+    pub unload_timer: u32,
 
     /// Битовая маска грязных субчанков
-    pub dirty_subchunks: AtomicU64,
+    pub dirty_subchunks: u64,
 
     /// Флаг: уведомлён ли рендер о загрузке чанка
-    pub render_notified: AtomicBool,
+    pub render_notified: bool,
 
     // Высотные границы (записываются один раз при загрузке)
     pub min_solid_y: u16,
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
+
+    pub generation: u64,
 }
 
 impl SlotMetadata {
     pub fn new() -> Self {
         Self {
-            state: AtomicU8::new(SlotState::Empty as u8),
+            state: SlotState::Empty,
             grid_x: 0,
             grid_z: 0,
-            file_dirty: AtomicBool::new(false),
-            pending_b_dirty: AtomicBool::new(false),
-            is_active: AtomicBool::new(false),
-            is_shadow: AtomicBool::new(false),
-            unload_timer: AtomicU32::new(0),
-            dirty_subchunks: AtomicU64::new(0),
-            render_notified: AtomicBool::new(false),
+            file_dirty: false,
+            pending_b_dirty: false,
+            is_active: false,
+            unload_timer: 0,
+            dirty_subchunks: 0,
+            render_notified: false,
             min_solid_y: CHUNK_HEIGHT as u16,
             max_solid_y: 0,
             min_liquid_y: CHUNK_HEIGHT as u16,
             max_liquid_y: 0,
+            generation: 0,
         }
     }
 
     #[inline(always)]
     pub fn get_state(&self) -> SlotState {
-        match self.state.load(Ordering::Acquire) {
-            0 => SlotState::Empty,
-            1 => SlotState::Queued,
-            2 => SlotState::Loading,
-            3 => SlotState::Ready,
-            4 => SlotState::AwaitingSave,
-            5 => SlotState::Saving,
-            _ => SlotState::Failed,
-        }
+        self.state
     }
 
     #[inline(always)]
-    pub fn set_state(&self, state: SlotState) {
-        self.state.store(state as u8, Ordering::Release);
+    pub fn set_state(&mut self, state: SlotState) {
+        self.state = state;
     }
 
     #[inline(always)]
     pub fn is_active(&self) -> bool {
-        self.is_active.load(Ordering::Acquire)
+        self.is_active
     }
 
     #[inline(always)]
-    pub fn set_active(&self, active: bool) {
-        self.is_active.store(active, Ordering::Release);
-    }
-
-    #[inline(always)]
-    pub fn is_shadow(&self) -> bool {
-        self.is_shadow.load(Ordering::Acquire)
-    }
-
-    #[inline(always)]
-    pub fn set_shadow(&self, shadow: bool) {
-        self.is_shadow.store(shadow, Ordering::Release);
+    pub fn set_active(&mut self, active: bool) {
+        self.is_active = active;
     }
 
     #[inline(always)]
     pub fn get_unload_timer(&self) -> u32 {
-        self.unload_timer.load(Ordering::Acquire)
+        self.unload_timer
     }
 
     #[inline(always)]
-    pub fn set_unload_timer(&self, value: u32) {
-        self.unload_timer.store(value, Ordering::Release);
+    pub fn set_unload_timer(&mut self, value: u32) {
+        self.unload_timer = value;
     }
 
     #[inline(always)]
-    pub fn decrement_unload_timer(&self) {
-        let current = self.unload_timer.load(Ordering::Acquire);
-        if current > 0 {
-            self.unload_timer.store(current - 1, Ordering::Release);
+    pub fn decrement_unload_timer(&mut self) {
+        if self.unload_timer > 0 {
+            self.unload_timer -= 1;
         }
     }
 
@@ -123,26 +106,28 @@ impl SlotMetadata {
 
     /// Помечает субчанк как грязный
     #[inline(always)]
-    pub fn mark_subchunk_dirty(&self, subchunk_idx: usize) {
-        self.dirty_subchunks.fetch_or(1u64 << subchunk_idx, Ordering::Release);
+    pub fn mark_subchunk_dirty(&mut self, subchunk_idx: usize) {
+        self.dirty_subchunks |= 1u64 << subchunk_idx;
     }
 
     /// Возвращает маску грязных субчанков
     #[inline(always)]
     pub fn get_dirty_subchunks(&self) -> u64 {
-        self.dirty_subchunks.load(Ordering::Acquire)
+        self.dirty_subchunks
     }
 
     /// Возвращает маску грязных субчанков и сбрасывает её
     #[inline(always)]
-    pub fn take_dirty_subchunks(&self) -> u64 {
-        self.dirty_subchunks.swap(0, Ordering::AcqRel)
+    pub fn take_dirty_subchunks(&mut self) -> u64 {
+        let mask = self.dirty_subchunks;
+        self.dirty_subchunks = 0;
+        mask
     }
 
     /// Сбрасывает маску грязных субчанков
     #[inline(always)]
-    pub fn clear_dirty_subchunks(&self) {
-        self.dirty_subchunks.store(0, Ordering::Release);
+    pub fn clear_dirty_subchunks(&mut self) {
+        self.dirty_subchunks = 0;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -152,13 +137,13 @@ impl SlotMetadata {
     /// Уведомлён ли рендер о загрузке чанка
     #[inline(always)]
     pub fn is_render_notified(&self) -> bool {
-        self.render_notified.load(Ordering::Acquire)
+        self.render_notified
     }
 
     /// Установить флаг уведомления рендера
     #[inline(always)]
-    pub fn set_render_notified(&self, notified: bool) {
-        self.render_notified.store(notified, Ordering::Release);
+    pub fn set_render_notified(&mut self, notified: bool) {
+        self.render_notified = notified;
     }
 }
 

@@ -4,7 +4,8 @@ use bevy::prelude::*;
 
 use crate::voxel::format::WINDOW_CHUNK_COUNT;
 use crate::voxel::pool::{ReadWorld, WriteWorld};
-use crate::manager::{ChunkManager, SlotState};
+
+use crate::manager::{ChunkManager, ReadWindowManager, SlotState};
 use crate::signals::{ComputePhase, ComputePipeline};
 
 /// Флаг завершения начального копирования
@@ -17,7 +18,8 @@ pub struct InitialCopyDone {
 pub fn initial_copy_system(
     mut read_world: ResMut<ReadWorld>,
     write_world: Res<WriteWorld>,
-    manager: Res<ChunkManager>,
+    mut manager: ResMut<ChunkManager>,
+    mut read_window: ResMut<ReadWindowManager>,
     mut pipeline: ResMut<ComputePipeline>,
     mut initial_copy: ResMut<InitialCopyDone>,
 ) {
@@ -47,6 +49,9 @@ pub fn initial_copy_system(
 
     println!("[INITIAL_COPY] DONE! Copied {} chunks from WriteWorld to ReadWorld", copied);
 
+    // Публикуем read-снапшот метаданных.
+    read_window.publish_from(&manager);
+    
     // Сбрасываем render_notified для всех Ready чанков
     // Чтобы dispatch_loaded_events_system отправил события на следующем кадре
     for slot in 0..WINDOW_CHUNK_COUNT {
