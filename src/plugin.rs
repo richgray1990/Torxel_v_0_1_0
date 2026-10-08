@@ -27,7 +27,7 @@ use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePipeline, SwapSignal};
 use crate::systems::{
     apply_cell_events_system, chunk_garbage_collector_system, dispatch_dirty_events_system,
-    dispatch_loaded_events_system,
+    dispatch_loaded_events_system, block_interaction_system,
     initial_copy_system, initialize_window_system, poll_background_tasks_system,
     post_swap_copy_system, request_swap_system, swap_pointers_system, update_window_system,
     InitialCopyDone, WindowInitialized,
@@ -236,9 +236,14 @@ impl Plugin for TorxelPlugin {
         );
 
         // UpdatePhase (параллельно)
-       app.add_systems(
+       // UpdatePhase: ввод камеры -> обновление окна -> трансформ камеры.
+        app.add_systems(
             Update,
-            (camera_input_system, update_window_system)
+            (
+                camera_input_system,
+                update_window_system,
+                camera_transform_system,
+            )
                 .chain()
                 .in_set(UpdatePhaseSet::UpdateWindow),
         );
@@ -274,7 +279,6 @@ impl Plugin for TorxelPlugin {
                 swap_meshes_system,
                 update_mesh_entities_system,
                 cleanup_mesh_entities_system,
-                camera_transform_system,
             )
                 .chain()
                 .in_set(ParallelWorkSet::Render),
@@ -285,6 +289,12 @@ impl Plugin for TorxelPlugin {
             Update,
             post_swap_copy_system.in_set(PostSwapBranchSet::PostSwapCopy),
         );
+
+        app.add_systems(
+            Update,
+            block_interaction_system.in_set(ComputeBlockSet::Subsystems),
+        );
+
         app.add_systems(
             Update,
             apply_cell_events_system.in_set(ComputeBlockSet::Aggregate),

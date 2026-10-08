@@ -12,7 +12,7 @@ pub mod dispatch_loaded;
 pub mod request_swap;
 
 pub mod debug;
-//pub mod render_stub;
+pub mod block_interaction;
 
 pub use poll_tasks::poll_background_tasks_system;
 
@@ -27,4 +27,4 @@ pub use dispatch_loaded::dispatch_loaded_events_system;
 pub use request_swap::request_swap_system;
 
 pub use debug::{debug_report_system, DebugTimer};
-//pub use render_stub::render_stub_system;
+pub use block_interaction::block_interaction_system;

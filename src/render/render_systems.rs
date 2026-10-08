@@ -10,8 +10,8 @@ use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, 
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
     CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
-    SUBCHUNK_SIDE, SUBCHUNK_HEIGHT, WorldDimensions,
-};
+    SUBCHUNK_SIDE, WorldDimensions,
+};  //-SUBCHUNK_HEIGHT
 use crate::voxel::pool::ReadWorld;
 
 /// Общий материал для всех субчанков.
@@ -230,11 +230,11 @@ pub fn update_mesh_entities_system(
         };
 
         let sub_x_offset = (key.subchunk_index % SUBCHUNKS_X) as f32 * SUBCHUNK_SIDE as f32;
-        let sub_y_offset = ((key.subchunk_index / SUBCHUNKS_X) % SUBCHUNKS_Y) as f32 * SUBCHUNK_HEIGHT as f32;
+       // let _sub_y_offset = ((key.subchunk_index / SUBCHUNKS_X) % SUBCHUNKS_Y) as f32 * SUBCHUNK_HEIGHT as f32;
         let sub_z_offset = (key.subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)) as f32 * SUBCHUNK_SIDE as f32;
 
         let world_x = key.chunk_x as f64 * CHUNK_SIDE as f64 + sub_x_offset as f64;
-        let world_y = sub_y_offset;
+        let world_y = 0.0;
         let world_z = key.chunk_z as f64 * CHUNK_SIDE as f64 + sub_z_offset as f64;
 
         let offset_x = dimensions.normalize_dx(controller.anchor_x, world_x);

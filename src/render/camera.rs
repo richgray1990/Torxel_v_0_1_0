@@ -8,7 +8,7 @@ const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
 
 /// Масштаб ортографической проекции при зуме 1.0.
 /// Эффективный масштаб = BASE_ORTHO_SCALE / zoom().
-pub const BASE_ORTHO_SCALE: f32 = 1.0;
+pub const BASE_ORTHO_SCALE: f32 = 0.25;
 const YAW_STEPS: [f32; 4] = [
     0.0,
     std::f32::consts::FRAC_PI_2,
@@ -185,14 +185,34 @@ pub fn camera_input_system(
 
 pub fn camera_transform_system(
     controller: Res<CameraController>,
-    mut camera_query: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    mut camera_query: Query<(&mut Transform, &mut GlobalTransform, &mut Projection), With<Camera3d>>,
 ) {
-    for (mut transform, mut projection) in camera_query.iter_mut() {
-        let camera_pos = controller.camera_position();
-        let anchor_pos = controller.anchor_position();
+    let look_dir = controller.look_direction();
+    let distance = controller.camera_height / controller.pitch.sin().max(0.001);
 
-        *transform = Transform::from_translation(camera_pos)
-            .looking_at(anchor_pos, Vec3::Y);
+    // Камера живёт в локальном пространстве вокруг (0, anchor_y, 0).
+    // Меши смещаются относительно якоря через normalize_dx/dz.
+    let local_camera_pos = Vec3::new(
+        -look_dir.x * distance,
+        controller.anchor_y as f32 - look_dir.y * distance,
+        -look_dir.z * distance,
+    );
+
+    let local_target = Vec3::new(
+        0.0,
+        controller.anchor_y as f32,
+        0.0,
+    );
+
+    for (mut transform, mut global_transform, mut projection) in camera_query.iter_mut() {
+        let new_transform = Transform::from_translation(local_camera_pos)
+            .looking_at(local_target, Vec3::Y);
+
+        *transform = new_transform;
+
+        // Обновляем GlobalTransform сразу, чтобы raycast в этом же кадре
+        // не использовал 'прошлогоднюю' позицию камеры.
+        *global_transform = GlobalTransform::from(new_transform);
 
         if let Projection::Orthographic(ortho) = &mut *projection {
             ortho.scale = BASE_ORTHO_SCALE / controller.zoom();

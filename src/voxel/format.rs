@@ -104,21 +104,31 @@ impl WorldDimensions {
         }
     }
 
-    #[inline]
+   #[inline]
     pub fn wrap_x(&self, x: f64) -> f64 {
         let w = self.width;
-        if w <= 0.0 { return x; }
+        if w <= 0.0 {
+            return x;
+        }
+
         let mut r = x % w;
-        if r < 0.0 { r += w; }
+        if r < 0.0 {
+            r += w;
+        }
         r
     }
 
     #[inline]
     pub fn wrap_z(&self, z: f64) -> f64 {
         let d = self.depth;
-        if d <= 0.0 { return z; }
+        if d <= 0.0 {
+            return z;
+        }
+
         let mut r = z % d;
-        if r < 0.0 { r += d; }
+        if r < 0.0 {
+            r += d;
+        }
         r
     }
 
