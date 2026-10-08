@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::render::{
     CameraController, camera_input_system, camera_transform_system,
+    init_voxel_material_system,
 };
 use crate::render::mesh_storage::MeshStorage;
 use crate::render::render_systems::{
@@ -220,7 +221,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
 
         // Startup
-        app.add_systems(Startup, initialize_window_system);
+        app.add_systems(Startup, (init_voxel_material_system, initialize_window_system));
 
         // PollPhase (параллельно)
         app.add_systems(
@@ -235,9 +236,11 @@ impl Plugin for TorxelPlugin {
         );
 
         // UpdatePhase (параллельно)
-        app.add_systems(
+       app.add_systems(
             Update,
-            update_window_system.in_set(UpdatePhaseSet::UpdateWindow),
+            (camera_input_system, update_window_system)
+                .chain()
+                .in_set(UpdatePhaseSet::UpdateWindow),
         );
         
         // SwapPointers
@@ -266,7 +269,6 @@ impl Plugin for TorxelPlugin {
         app.add_systems(
             Update,
             (
-                camera_input_system,
                 process_mesh_events_system,
                 build_meshes_system,
                 swap_meshes_system,

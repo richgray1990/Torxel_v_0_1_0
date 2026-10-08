@@ -1,20 +1,19 @@
 //! Начальное копирование данных из WriteWorld в ReadWorld.
-
 use bevy::prelude::*;
 
-use crate::voxel::format::WINDOW_CHUNK_COUNT;
+use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 
 use crate::manager::{ChunkManager, ReadWindowManager, SlotState};
 use crate::signals::{ComputePhase, ComputePipeline};
 
-/// Флаг завершения начального копирования
+/// Флаг завершения начального копирования.
 #[derive(Resource, Default)]
 pub struct InitialCopyDone {
     pub done: bool,
 }
 
-/// Система начального копирования
+/// Система начального копирования.
 pub fn initial_copy_system(
     mut read_world: ResMut<ReadWorld>,
     write_world: Res<WriteWorld>,
@@ -23,43 +22,41 @@ pub fn initial_copy_system(
     mut pipeline: ResMut<ComputePipeline>,
     mut initial_copy: ResMut<InitialCopyDone>,
 ) {
-    
     if initial_copy.done {
         return;
     }
 
-    // ИСПРАВЛЕНИЕ: пропускаем Failed слоты
-    let all_ready = (0..WINDOW_CHUNK_COUNT).all(|slot| {
-        let state = manager.get_slot_state(slot);
-        state == SlotState::Ready || state == SlotState::Failed
+    // Ждём, пока все начальные чанки перестанут быть Queued/Loading.
+    let all_resolved = manager.metadata.iter().all(|meta| {
+        meta.state != SlotState::Queued && meta.state != SlotState::Loading
     });
 
-    if !all_ready {
+    if !all_resolved {
         return;
     }
 
-    // ИСПРАВЛЕНИЕ: копируем только Ready слоты
     let mut copied = 0;
-    for slot in 0..WINDOW_CHUNK_COUNT {
-        if manager.get_slot_state(slot) == SlotState::Ready {
+
+    for slot in 0..POOL_CHUNK_COUNT {
+        let meta = &manager.metadata[slot];
+
+        if meta.state == SlotState::Ready && meta.is_active {
             read_world.0.copy_chunk_from(&write_world.0, slot);
+
+            manager.metadata[slot].pending_b_dirty = false;
+            manager.metadata[slot].render_notified = false;
+
             copied += 1;
         }
     }
 
-    println!("[INITIAL_COPY] DONE! Copied {} chunks from WriteWorld to ReadWorld", copied);
+    println!(
+        "[INITIAL_COPY] DONE! Copied {} chunks from WriteWorld to ReadWorld",
+        copied
+    );
 
-    // Публикуем read-снапшот метаданных.
     read_window.publish_from(&manager);
-    
-    // Сбрасываем render_notified для всех Ready чанков
-    // Чтобы dispatch_loaded_events_system отправил события на следующем кадре
-    for slot in 0..WINDOW_CHUNK_COUNT {
-        if manager.get_slot_state(slot) == SlotState::Ready {
-            manager.metadata[slot].set_render_notified(false);
-        }
-    }
-    
+
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;
 }

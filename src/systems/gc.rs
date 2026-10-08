@@ -1,57 +1,61 @@
 //! Сборщик мусора: выгрузка чанков и сохранение на диск.
 use bevy::prelude::*;
+
 use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::pool::ReadWorld;
 use crate::io::channels::SaveRequest;
 use crate::manager::{ChunkManager, SlotState};
 
-/// Система сборки мусора
+/// Система сборки мусора.
 pub fn chunk_garbage_collector_system(
     mut manager: ResMut<ChunkManager>,
     read_world: Res<ReadWorld>,
 ) {
     for slot in 0..POOL_CHUNK_COUNT {
-        // Читаем все нужные значения ДО любых мутаций.
-        let state = manager.metadata[slot].state;
+        let (state, is_active, unload_timer, file_dirty, grid_x, grid_z) = {
+            let meta = &manager.metadata[slot];
+            (
+                meta.state,
+                meta.is_active,
+                meta.unload_timer,
+                meta.file_dirty,
+                meta.grid_x,
+                meta.grid_z,
+            )
+        };
 
-        // Работаем только с готовыми чанками
+        // Работаем только с готовыми чанками.
         if state != SlotState::Ready {
             continue;
         }
 
-        // Если чанк в активном или теневом окне — не выгружаем
-        if manager.metadata[slot].is_active {
+        // Если чанк активен — не выгружаем.
+        if is_active {
             continue;
         }
 
-        // Тикаем таймер выгрузки
-        let timer = manager.metadata[slot].unload_timer;
-        if timer > 0 {
-            manager.metadata[slot].unload_timer = timer - 1;
+        // Тикаем таймер выгрузки.
+        if unload_timer > 0 {
+            manager.metadata[slot].unload_timer = unload_timer - 1;
             continue;
         }
 
-        // Таймер исчерпан — выгружаем чанк
-        let file_dirty = manager.metadata[slot].file_dirty;
-        let grid_x = manager.metadata[slot].grid_x;
-        let grid_z = manager.metadata[slot].grid_z;
-
+        // Таймер исчерпан — выгружаем чанк.
         if file_dirty {
-            // Чанк грязный — отправляем на сохранение
+            // Чанк грязный — отправляем на сохранение.
             let data = read_world.0.chunk_slice(slot).to_vec();
+
             manager.save_queue.push(SaveRequest {
                 slot,
                 chunk_x: grid_x as usize,
                 chunk_z: grid_z as usize,
                 data,
             });
+
             manager.set_slot_state(slot, SlotState::AwaitingSave);
         } else {
-            // Чанк чистый — просто освобождаем слот
-            // Сбрасываем флаг уведомления рендера,
-            // чтобы при повторной загрузке событие отправилось снова
-            manager.metadata[slot].render_notified = false;
-            manager.set_slot_state(slot, SlotState::Empty);
+            // Чанк чистый — освобождаем слот.
+            manager.release_slot(slot);
         }
     }
 }

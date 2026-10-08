@@ -47,8 +47,8 @@ impl SlotMetadata {
     pub fn new() -> Self {
         Self {
             state: SlotState::Empty,
-            grid_x: 0,
-            grid_z: 0,
+            grid_x: -1,
+            grid_z: -1,
             file_dirty: false,
             pending_b_dirty: false,
             is_active: false,

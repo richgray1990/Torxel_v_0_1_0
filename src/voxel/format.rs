@@ -124,21 +124,53 @@ impl WorldDimensions {
 
     #[inline]
     pub fn normalize_dx(&self, from_x: f64, to_x: f64) -> f64 {
-        let mut dx = to_x - from_x;
-        let half = self.width / 2.0;
-        if dx > half { dx -= self.width; }
-        if dx < -half { dx += self.width; }
-        dx
+        let w = self.width;
+        if w <= 0.0 {
+            return to_x - from_x;
+        }
+
+        let d = (to_x - from_x).rem_euclid(w);
+
+        if d > w * 0.5 {
+            d - w
+        } else {
+            d
+        }
     }
 
     #[inline]
     pub fn normalize_dz(&self, from_z: f64, to_z: f64) -> f64 {
-        let mut dz = to_z - from_z;
-        let half = self.depth / 2.0;
-        if dz > half { dz -= self.depth; }
-        if dz < -half { dz += self.depth; }
-        dz
+        let d = self.depth;
+        if d <= 0.0 {
+            return to_z - from_z;
+        }
+
+        let v = (to_z - from_z).rem_euclid(d);
+
+        if v > d * 0.5 {
+            v - d
+        } else {
+            v
+        }
     }
+
+    // #[inline]
+    // pub fn normalize_dx(&self, from_x: f64, to_x: f64) -> f64 {
+    //     let mut dx = to_x - from_x;
+    //     let half = self.width / 2.0;
+    //     if dx > half { dx -= self.width; }
+    //     if dx < -half { dx += self.width; }
+    //     dx
+    // }
+
+    // #[inline]
+    // pub fn normalize_dz(&self, from_z: f64, to_z: f64) -> f64 {
+    //     let mut dz = to_z - from_z;
+    //     let half = self.depth / 2.0;
+    //     if dz > half { dz -= self.depth; }
+    //     if dz < -half { dz += self.depth; }
+    //     dz
+    // }
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -14,6 +14,26 @@ use crate::voxel::format::{
 };
 use crate::voxel::pool::ReadWorld;
 
+/// Общий материал для всех субчанков.
+///
+/// Цвет приходит через вершинный атрибут `ATTRIBUTE_COLOR`,
+/// поэтому нужен один белый материал на весь рендер.
+#[derive(Resource)]
+pub struct VoxelMaterialHandle(pub Handle<StandardMaterial>);
+
+/// Создаёт общий материал вокселя один раз при старте.
+pub fn init_voxel_material_system(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let handle = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        ..Default::default()
+    });
+
+    commands.insert_resource(VoxelMaterialHandle(handle));
+}
+
 pub fn process_mesh_events_system(
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     mut mesh_storage: ResMut<MeshStorage>,
@@ -87,14 +107,7 @@ pub fn build_meshes_system(
             to_build.push(*key);
         }
     }
-
-    for (key, data) in mesh_storage.subchunks.iter() {
-        if key.subchunk_index == 0 && data.current_mesh.is_none() && data.state == SubchunkRenderState::Ready {
-            println!("[DEBUG] sub0 without mesh: chunk=({},{}) state={:?} — SKIPPED (not Empty/Dirty)",
-                key.chunk_x, key.chunk_z, data.state);
-        }
-    }
-
+    
     for key in to_build {
         let data = match mesh_storage.get_mut(&key) {
             Some(d) => d,
@@ -105,6 +118,10 @@ pub fn build_meshes_system(
             Some(s) => s,
             None => continue,
         };
+
+        if !read_window.is_ready(slot) {
+            continue;
+        }
 
         let mesh_data = build_subchunk_mesh(
             key.subchunk_index,
@@ -190,7 +207,7 @@ pub fn swap_meshes_system(
 pub fn update_mesh_entities_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    voxel_material: Res<VoxelMaterialHandle>,
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
     mut transforms: Query<&mut Transform>,
@@ -232,15 +249,10 @@ pub fn update_mesh_entities_system(
                 }
             }
             None => {
-                let material_handle = materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    ..Default::default()
-                });
-
                 let entity = commands
                     .spawn((
                         Mesh3d(mesh_handle),
-                        MeshMaterial3d(material_handle),
+                        MeshMaterial3d(voxel_material.0.clone()),
                         Transform::from_translation(position),
                         Visibility::default(),
                     ))
