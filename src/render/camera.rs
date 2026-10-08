@@ -8,7 +8,7 @@ const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
 
 /// Масштаб ортографической проекции при зуме 1.0.
 /// Эффективный масштаб = BASE_ORTHO_SCALE / zoom().
-pub const BASE_ORTHO_SCALE: f32 = 128.0;
+pub const BASE_ORTHO_SCALE: f32 = 1.0;
 const YAW_STEPS: [f32; 4] = [
     0.0,
     std::f32::consts::FRAC_PI_2,
