@@ -1,13 +1,13 @@
 //! Реестр материалов.
 
 pub mod ids {
-    pub const AIR: u16 = 0;
-    pub const BEDROCK: u16 = 1;
-    pub const STONE: u16 = 2;
-    pub const DIRT: u16 = 3;
-    pub const GRASS: u16 = 4;
-    pub const WATER: u16 = 5;
-    pub const CLAY: u16 = 6;
+    pub const AIR: u8 = 0;
+    pub const BEDROCK: u8 = 1;
+    pub const STONE: u8 = 2;
+    pub const DIRT: u8 = 3;
+    pub const GRASS: u8 = 4;
+    pub const WATER: u8 = 5;
+    pub const CLAY: u8 = 6;
 }
 
 pub mod phases {
@@ -19,7 +19,7 @@ pub mod phases {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Material {
-    pub id: u16,
+    pub id: u8,
     pub name: &'static str,
     pub color: [u8; 3],
     pub opacity: f32,
@@ -37,21 +37,21 @@ pub const MATERIALS: &[Material] = &[
 ];
 
 #[inline]
-pub fn get_material(id: u16) -> Option<&'static Material> {
+pub fn get_material(id: u8) -> Option<&'static Material> {
     MATERIALS.iter().find(|m| m.id == id)
 }
 
 #[inline]
-pub fn material_color(id: u16) -> [u8; 3] {
+pub fn material_color(id: u8) -> [u8; 3] {
     get_material(id).map(|m| m.color).unwrap_or([0, 0, 0])
 }
 
 #[inline]
-pub fn is_transparent(id: u16) -> bool {
+pub fn is_transparent(id: u8) -> bool {
     get_material(id).map(|m| m.opacity < 1.0).unwrap_or(true)
 }
 
 #[inline]
-pub fn is_air(id: u16) -> bool {
+pub fn is_air(id: u8) -> bool {
     id == ids::AIR
 }

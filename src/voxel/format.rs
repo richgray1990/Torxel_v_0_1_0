@@ -5,29 +5,14 @@ use bevy::prelude::*;
 pub const CHUNK_SIDE: usize = 16;
 
 /// Материал для блоков за пределами мира
-pub const MATERIAL_OUT_OF_WORLD: u16 = 65535;
+pub const MATERIAL_OUT_OF_WORLD: u16 = 255;
 
 /// Размер пула по стороне (чанков). 32×32 = 1024
 pub const POOL_SIDE: usize = 32;
 
 /// Высота чанка (ячеек)
 #[cfg(feature = "height64")]
-pub const CHUNK_HEIGHT: usize = 64;
-
-#[cfg(feature = "height128")]
-pub const CHUNK_HEIGHT: usize = 128;
-
-#[cfg(feature = "height256")]
 pub const CHUNK_HEIGHT: usize = 256;
-
-#[cfg(feature = "height512")]
-pub const CHUNK_HEIGHT: usize = 512;
-
-#[cfg(feature = "height1024")]
-pub const CHUNK_HEIGHT: usize = 1024;
-
-#[cfg(not(any(feature = "height64", feature = "height128", feature = "height256", feature = "height512", feature = "height1024")))]
-pub const CHUNK_HEIGHT: usize = 64;
 
 /// Всего ячеек в одном чанке
 pub const CELLS_PER_CHUNK: usize = CHUNK_SIDE * CHUNK_HEIGHT * CHUNK_SIDE;
@@ -39,7 +24,7 @@ pub const WINDOW_SIDE: usize = 16;
 pub const WINDOW_CHUNK_COUNT: usize = WINDOW_SIDE * WINDOW_SIDE;
 
 /// Размер пула (чанков)
-pub const POOL_CHUNK_COUNT: usize = 1024;
+pub const POOL_CHUNK_COUNT: usize = POOL_SIDE * POOL_SIDE;
 
 // Реэкспорт материалов для обратной совместимости
 pub use super::materials::ids::AIR as MATERIAL_AIR;
@@ -190,21 +175,33 @@ impl WorldDimensions {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Cell {
-    pub material_id: u16,
-    pub phase_state: u8,
-    pub liquid_level: u8,
-    pub temperature: i16,
-    pub chemical_mask: u16,
-
-    pub vel_x: i16,
-    pub vel_y: i16,
-    pub vel_z: i16,
-    pub _padding_vel: i16,
-
-    pub pressure: i32,
-    pub excess_level: i32,
-
-    pub reserved_future: [u8; 40],
+    // === Идентификация (3 байта) ===
+    pub material_id: u8,            // Тип материала
+    pub form: u8,                // Форма (пусто, полный, треугольники)
+    pub direction: u8,           // Направление / ориентация
+    
+    // === Жидкости и фаза (2 байта) ===
+    pub liquid_level: u8,        // Уровень жидкости (0-8)
+    pub phase_state: u8,         // Фаза (твёрдое/жидкое/газ)
+    
+    // === Физика (3 байта) ===
+    pub temperature: u16,        // Температура
+    pub humidity: u8,            // Влажность
+    
+    // === Состояние (2 байта) ===
+    pub damage: u8,              // Повреждение
+    pub state: u8,               // Основное состояние
+    
+    // === Метаданные (3 байта) ===
+    pub additional_bitmap: u8,   // Флаги (is_natural и др.)
+    pub age: u16,                // Возраст
+    
+    // === Дополнительные данные (2 байта) ===
+    pub additional_state: u8,    // Дополнительное состояние / эффект
+    pub metadata: u8,            // Флаги, метаданные, соединения
+    
+    // === Внешние ссылки (1 байт) ===
+    pub external_id: u8,         // ID внешней сущности (моды, сложные блоки)
 }
 
 unsafe impl Pod for Cell {}
