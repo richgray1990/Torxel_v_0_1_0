@@ -27,4 +27,4 @@ pub use dispatch_loaded::dispatch_loaded_events_system;
 pub use request_swap::request_swap_system;
 
 pub use debug::{debug_report_system, DebugTimer};
-pub use block_interaction::block_interaction_system;
+pub use block_interaction::{block_interaction_system, init_highlight_system, HighlightState,};

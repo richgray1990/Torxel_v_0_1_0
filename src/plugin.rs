@@ -27,10 +27,10 @@ use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePipeline, SwapSignal};
 use crate::systems::{
     apply_cell_events_system, chunk_garbage_collector_system, dispatch_dirty_events_system,
-    dispatch_loaded_events_system, block_interaction_system,
+    dispatch_loaded_events_system, block_interaction_system, init_highlight_system,
     initial_copy_system, initialize_window_system, poll_background_tasks_system,
     post_swap_copy_system, request_swap_system, swap_pointers_system, update_window_system,
-    InitialCopyDone, WindowInitialized,
+    HighlightState, InitialCopyDone, WindowInitialized,
 };
 use crate::systems::debug::{debug_report_system, DebugTimer};
 
@@ -124,6 +124,7 @@ impl Plugin for TorxelPlugin {
         app.insert_resource(ComputePipeline::default());
         app.insert_resource(io_manager);
         app.insert_resource(header);
+        
         app.init_resource::<SwapSignal>();
         app.init_resource::<MeshUpdateQueue>();
         app.init_resource::<CellEventQueue>();
@@ -139,6 +140,8 @@ impl Plugin for TorxelPlugin {
         app.init_resource::<CameraController>();
         app.init_resource::<MeshStorage>();
         app.init_resource::<DebugTimer>();
+
+        app.init_resource::<HighlightState>();
 
         // ═══════════════════════════════════════════════════════════
         // Уровень 1: строгая цепочка фаз
@@ -221,7 +224,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
 
         // Startup
-        app.add_systems(Startup, (init_voxel_material_system, initialize_window_system));
+        app.add_systems(Startup, (init_voxel_material_system, init_highlight_system, initialize_window_system));
 
         // PollPhase (параллельно)
         app.add_systems(
