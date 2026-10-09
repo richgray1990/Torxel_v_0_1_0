@@ -11,8 +11,7 @@ pub const MATERIAL_OUT_OF_WORLD: u16 = 255;
 pub const POOL_SIDE: usize = 32;
 
 /// Высота чанка (ячеек)
-#[cfg(feature = "height64")]
-pub const CHUNK_HEIGHT: usize = 256;
+pub const CHUNK_HEIGHT: usize = 512;
 
 /// Всего ячеек в одном чанке
 pub const CELLS_PER_CHUNK: usize = CHUNK_SIDE * CHUNK_HEIGHT * CHUNK_SIDE;

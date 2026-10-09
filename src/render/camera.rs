@@ -3,27 +3,17 @@
 use bevy::prelude::*;
 
 const PITCH_SPEED: f32 = 45.0;
-const MOVE_SPEED: f32 = 16.0;
+const MOVE_SPEED: f32 = 64.0;
 const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
 
 /// Масштаб ортографической проекции при зуме 1.0.
 /// Эффективный масштаб = BASE_ORTHO_SCALE / zoom().
-pub const BASE_ORTHO_SCALE: f32 = 0.25;
-// const YAW_STEPS: [f32; 8] = [
-//     0.0,
-//     std::f32::consts::FRAC_PI_4,
-//     std::f32::consts::FRAC_PI_2,
-//     3.0 * std::f32::consts::FRAC_PI_4,
-//     std::f32::consts::PI,
-//     5.0 * std::f32::consts::FRAC_PI_4,
-//     3.0 * std::f32::consts::FRAC_PI_2,
-//     7.0 * std::f32::consts::FRAC_PI_4,
-// ];
+//pub const BASE_ORTHO_SCALE: f32 = 0.25;
 
 #[derive(Resource)]
 pub struct CameraController {
     pub pitch: f32,
-    pub yaw_index: usize,
+    //pub yaw_index: usize,
     pub yaw: f64,
     pub zoom_index: usize,
     pub anchor_x: f64,
@@ -193,7 +183,7 @@ pub fn camera_input_system(
 
 pub fn camera_transform_system(
     controller: Res<CameraController>,
-    mut camera_query: Query<(&mut Transform, &mut GlobalTransform, &mut Projection), With<Camera3d>>,
+    mut camera_query: Query<(&mut Transform, &mut GlobalTransform), With<Camera3d>>,
 ) {
     let look_dir = controller.look_direction();
     let distance = controller.camera_height / controller.pitch.sin().max(0.001);
@@ -212,7 +202,7 @@ pub fn camera_transform_system(
         0.0,
     );
 
-    for (mut transform, mut global_transform, mut projection) in camera_query.iter_mut() {
+    for (mut transform, mut global_transform) in camera_query.iter_mut() {
         let new_transform = Transform::from_translation(local_camera_pos)
             .looking_at(local_target, Vec3::Y);
 

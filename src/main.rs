@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use torxel::render::BASE_ORTHO_SCALE;
 use torxel::voxel::topology::TorusTopology;
 use torxel::TorxelPlugin;
 

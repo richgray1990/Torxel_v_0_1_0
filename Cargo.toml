@@ -21,17 +21,6 @@ crossbeam = "0.8"
 rayon = "1.10"
 smallvec = "1.16.0"
 
-[features]
-default = ["side16", "height64"]
-side8 = []
-side16 = []
-side32 = []
-height64 = []
-height128 = []
-height256 = []
-height512 = []
-height1024 = []
-
 # Dev профиль: быстрая компиляция для итераций
 [profile.dev]
 opt-level = 1 # Немного оптимизируем, чтобы тесты летали
