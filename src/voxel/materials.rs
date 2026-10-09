@@ -28,8 +28,8 @@ pub struct Material {
 
 pub const MATERIALS: &[Material] = &[
     Material { id: ids::AIR, name: "Air", color: [0, 0, 0], opacity: 0.0, phase: phases::GAS },
-    Material { id: ids::BEDROCK, name: "Bedrock", color: [30, 30, 30], opacity: 1.0, phase: phases::SOLID },
-    Material { id: ids::STONE, name: "Stone", color: [128, 128, 128], opacity: 1.0, phase: phases::SOLID },
+    Material { id: ids::BEDROCK, name: "Bedrock", color: [30, 130, 130], opacity: 1.0, phase: phases::SOLID },
+    Material { id: ids::STONE, name: "Stone", color: [168, 168, 168], opacity: 1.0, phase: phases::SOLID },
     Material { id: ids::DIRT, name: "Dirt", color: [139, 90, 43], opacity: 1.0, phase: phases::SOLID },
     Material { id: ids::GRASS, name: "Grass", color: [34, 139, 34], opacity: 1.0, phase: phases::SOLID },
     Material { id: ids::WATER, name: "Water", color: [30, 100, 200], opacity: 0.7, phase: phases::LIQUID },

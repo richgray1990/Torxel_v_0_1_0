@@ -18,10 +18,10 @@ fn setup_camera(mut commands: Commands) {
     // Ортогональная камера для изометрического вида
     commands.spawn((
         Camera3d::default(),
-       Projection::Orthographic(OrthographicProjection {
-            scale: BASE_ORTHO_SCALE,
-            ..OrthographicProjection::default_3d()
-        }),
+    //    Projection::Orthographic(OrthographicProjection {
+    //         scale: BASE_ORTHO_SCALE,
+    //         ..OrthographicProjection::default_3d()
+    //     }),
         Transform::from_xyz(0.0, 50.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     

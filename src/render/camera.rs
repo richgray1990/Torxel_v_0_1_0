@@ -9,17 +9,22 @@ const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
 /// Масштаб ортографической проекции при зуме 1.0.
 /// Эффективный масштаб = BASE_ORTHO_SCALE / zoom().
 pub const BASE_ORTHO_SCALE: f32 = 0.25;
-const YAW_STEPS: [f32; 4] = [
-    0.0,
-    std::f32::consts::FRAC_PI_2,
-    std::f32::consts::PI,
-    3.0 * std::f32::consts::FRAC_PI_2,
-];
+// const YAW_STEPS: [f32; 8] = [
+//     0.0,
+//     std::f32::consts::FRAC_PI_4,
+//     std::f32::consts::FRAC_PI_2,
+//     3.0 * std::f32::consts::FRAC_PI_4,
+//     std::f32::consts::PI,
+//     5.0 * std::f32::consts::FRAC_PI_4,
+//     3.0 * std::f32::consts::FRAC_PI_2,
+//     7.0 * std::f32::consts::FRAC_PI_4,
+// ];
 
 #[derive(Resource)]
 pub struct CameraController {
     pub pitch: f32,
     pub yaw_index: usize,
+    pub yaw: f64,
     pub zoom_index: usize,
     pub anchor_x: f64,
     pub anchor_y: f64,
@@ -34,7 +39,8 @@ impl CameraController {
         let initial_zoom = ZOOM_LEVELS[0];
         Self {
             pitch: 45.0_f32.to_radians(),
-            yaw_index: 0,
+            //yaw_index: 0,
+            yaw: 0.0,
             zoom_index: 0,
             anchor_x: 0.0,
             anchor_y: 64.0,
@@ -46,8 +52,9 @@ impl CameraController {
     }
 
     #[inline]
-    pub fn yaw(&self) -> f32 {
-        YAW_STEPS[self.yaw_index]
+    pub fn yaw(&self) -> f64 {
+        //YAW_STEPS[self.yaw_index]
+        0.1 * std::f32::consts::FRAC_PI_8 as f64
     }
 
     #[inline]
@@ -70,11 +77,13 @@ impl CameraController {
     }
 
     pub fn rotate_left(&mut self) {
-        self.yaw_index = (self.yaw_index + 3) % 4;
+        //self.yaw_index = (self.yaw_index + 3) % 4;
+        self.yaw += self.yaw();
     }
 
     pub fn rotate_right(&mut self) {
-        self.yaw_index = (self.yaw_index + 1) % 4;
+        //self.yaw_index = (self.yaw_index + 1) % 4;
+        self.yaw -= self.yaw();
     }
 
     fn update_view_size(&mut self) {
@@ -85,15 +94,15 @@ impl CameraController {
 
     #[inline]
     pub fn look_direction(&self) -> Vec3 {
-        let cos_pitch = self.pitch.cos();
-        let sin_pitch = self.pitch.sin();
-        let cos_yaw = self.yaw().cos();
-        let sin_yaw = self.yaw().sin();
+        let cos_pitch = self.pitch.cos() as f64;
+        let sin_pitch = self.pitch.sin() as f64;
+        let cos_yaw = self.yaw.cos();
+        let sin_yaw = self.yaw.sin();
 
         Vec3::new(
-            -cos_pitch * sin_yaw,
-            -sin_pitch,
-            -cos_pitch * cos_yaw,
+            (-cos_pitch * sin_yaw) as f32,
+            (-sin_pitch) as f32,
+            (-cos_pitch * cos_yaw) as f32,
         )
         .normalize()
     }
@@ -134,17 +143,17 @@ pub fn camera_input_system(
 
     if keys.pressed(KeyCode::KeyX) {
         controller.pitch += PITCH_SPEED.to_radians() * dt;
-        controller.pitch = controller.pitch.min(90.0_f32.to_radians());
+        controller.pitch = controller.pitch.min(89.9_f32.to_radians());
     }
     if keys.pressed(KeyCode::KeyZ) {
         controller.pitch -= PITCH_SPEED.to_radians() * dt;
         controller.pitch = controller.pitch.max(10.0_f32.to_radians());
     }
 
-    if keys.just_pressed(KeyCode::KeyQ) {
+    if keys.pressed(KeyCode::KeyQ) {
         controller.rotate_left();
     }
-    if keys.just_pressed(KeyCode::KeyE) {
+    if keys.pressed(KeyCode::KeyE) {
         controller.rotate_right();
     }
 
@@ -168,9 +177,8 @@ pub fn camera_input_system(
         move_x /= len;
         move_z /= len;
 
-        let yaw = controller.yaw();
-        let cos_yaw = yaw.cos() as f64;
-        let sin_yaw = yaw.sin() as f64;
+        let cos_yaw = controller.yaw.cos() as f64;
+        let sin_yaw = controller.yaw.sin() as f64;
 
         // ИСПРАВЛЕНИЕ: формула вращения по часовой стрелке
         // (соответствует направлению взгляда в look_direction)
@@ -214,8 +222,8 @@ pub fn camera_transform_system(
         // не использовал 'прошлогоднюю' позицию камеры.
         *global_transform = GlobalTransform::from(new_transform);
 
-        if let Projection::Orthographic(ortho) = &mut *projection {
-            ortho.scale = BASE_ORTHO_SCALE / controller.zoom();
-        }
+        // if let Projection::Orthographic(ortho) = &mut *projection {
+        //     ortho.scale = BASE_ORTHO_SCALE / controller.zoom();
+        // }
     }
 }
