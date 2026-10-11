@@ -114,6 +114,13 @@ impl ReadWindowManager {
 
     #[inline(always)]
     pub fn chunk_key(&self, chunk_x: usize, chunk_z: usize) -> usize {
+        debug_assert!(
+            chunk_x < self.topology.chunks_x as usize && chunk_z < self.topology.chunks_z as usize,
+            "chunk_key: coordinates must be normalized, got ({}, {})",
+            chunk_x,
+            chunk_z
+        );
+
         chunk_z * self.topology.chunks_x as usize + chunk_x
     }
 

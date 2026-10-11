@@ -6,7 +6,7 @@ pub mod masks;
 pub mod window;
 pub mod exclusive_pool;
 
-pub use metadata::{SlotMetadata, SlotState};
+pub use metadata::{SlotMetadata, SlotState, LOAD_TIMEOUT_FRAMES};
 pub use manager::{ChunkManager, UNLOAD_DELAY_FRAMES};
 pub use masks::{DirtyMask};
 pub use window::{ReadSlotSnapshot, ReadWindowManager};

@@ -14,9 +14,14 @@ pub struct LoadRequest {
 }
 
 /// Ответ на загрузку чанка (активный пул)
+///
+/// Координаты дублируют запрос: слот мог быть переиспользован под другой чанк,
+/// пока ответ шёл через канал. Приёмник сверяет их с текущими метаданными слота.
 #[derive(Clone, Debug)]
 pub struct LoadResponse {
     pub slot: usize,
+    pub chunk_x: usize,
+    pub chunk_z: usize,
     pub data: Vec<Cell>,
     pub min_solid_y: u16,
     pub max_solid_y: u16,

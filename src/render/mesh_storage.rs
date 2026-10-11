@@ -12,7 +12,6 @@ pub enum SubchunkRenderState {
     Ready,
     Dirty,
     Rebuilding,
-    Unloading,
 }
 
 pub struct SubchunkRenderData {

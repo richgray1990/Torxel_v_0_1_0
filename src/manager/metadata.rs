@@ -18,6 +18,9 @@ pub enum SlotState {
     Failed = 6,
 }
 
+/// Сколько кадров слоту разрешено висеть в `Loading` до принудительного `Failed`.
+pub const LOAD_TIMEOUT_FRAMES: u32 = 300;
+
 /// Метаданные одного слота
 pub struct SlotMetadata {
     pub state: SlotState,
@@ -27,6 +30,10 @@ pub struct SlotMetadata {
     pub pending_b_dirty: bool,
     pub is_active: bool,
     pub unload_timer: u32,
+
+    /// Кадров подряд в состоянии `Loading`. Сбрасывается при входе в `Loading`.
+    /// Превышение `LOAD_TIMEOUT_FRAMES` переводит слот в `Failed`.
+    pub load_frames: u32,
 
     /// Битовая маска грязных субчанков
     pub dirty_subchunks: u64,
@@ -53,6 +60,7 @@ impl SlotMetadata {
             pending_b_dirty: false,
             is_active: false,
             unload_timer: 0,
+            load_frames: 0,
             dirty_subchunks: 0,
             render_notified: false,
             min_solid_y: CHUNK_HEIGHT as u16,

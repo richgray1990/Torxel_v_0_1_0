@@ -15,10 +15,18 @@ pub fn poll_background_tasks_system(
 ) {
     // Забираем ответы на загрузку из канала.
     while let Some(response) = io_manager.try_recv_load_response() {
+        let slot = response.slot;
+
+        // Слот мог быть переиспользован под другой чанк, пока ответ шёл через канал.
+        // Принимаем ответ только если слот всё ещё грузит тот же самый чанк.
+        if !slot_still_loading(&manager, slot, response.chunk_x, response.chunk_z) {
+            continue;
+        }
+
         if response.success {
-            let meta = &manager.metadata[response.slot];
+            let meta = &manager.metadata[slot];
             staging.push_loaded(crate::io::staging::StagedChunk {
-                slot: response.slot,
+                slot,
                 grid_x: meta.grid_x,
                 grid_z: meta.grid_z,
                 data: response.data,
@@ -28,7 +36,7 @@ pub fn poll_background_tasks_system(
                 max_liquid_y: response.max_liquid_y,
             });
         } else {
-            manager.set_slot_state(response.slot, SlotState::Failed);
+            manager.set_slot_state(slot, SlotState::Failed);
         }
     }
 
@@ -78,4 +86,19 @@ pub fn poll_background_tasks_system(
             manager.set_slot_state(slot, SlotState::Failed);
         }
     }
+}
+
+/// Слот всё ещё грузит тот же чанк, который запрашивал ответ.
+#[inline(always)]
+fn slot_still_loading(
+    manager: &ChunkManager,
+    slot: usize,
+    chunk_x: usize,
+    chunk_z: usize,
+) -> bool {
+    let meta = &manager.metadata[slot];
+
+    meta.state == SlotState::Loading
+        && meta.grid_x == chunk_x as i64
+        && meta.grid_z == chunk_z as i64
 }

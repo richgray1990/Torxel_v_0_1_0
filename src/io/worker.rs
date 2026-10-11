@@ -57,6 +57,9 @@ impl IoWorker {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("Failed to open world file: {}", e);
+                // Молчаливый выход оставил бы все запросы без ответа: слоты висят
+                // в Loading, а initial_copy не завершается. Отвечаем отказом на всё.
+                Self::fail_all_requests(channels, shutdown);
                 return;
             }
         };
@@ -107,18 +110,18 @@ impl IoWorker {
         //     request.chunk_x, request.chunk_z, chunk_index, offset);
 
         if file.seek(SeekFrom::Start(offset)).is_err() {
-            return Self::empty_load_response(request.slot);
+            return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
         }
 
         let mut chunk_header_bytes = [0u8; 32];
         if file.read_exact(&mut chunk_header_bytes).is_err() {
-            return Self::empty_load_response(request.slot);
+            return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
         }
 
         let chunk_header: &ChunkHeader = bytemuck::from_bytes(&chunk_header_bytes);
 
         if !chunk_header.is_valid() {
-            return Self::empty_load_response(request.slot);
+            return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
         }
 
         let mut data = vec![Cell::zeroed(); CELLS_PER_CHUNK];
@@ -127,6 +130,8 @@ impl IoWorker {
         match file.read_exact(bytes) {
             Ok(_) => LoadResponse {
                 slot: request.slot,
+                chunk_x: request.chunk_x,
+                chunk_z: request.chunk_z,
                 data,
                 min_solid_y: chunk_header.min_solid_y,
                 max_solid_y: chunk_header.max_solid_y,
@@ -134,7 +139,9 @@ impl IoWorker {
                 max_liquid_y: chunk_header.max_liquid_y,
                 success: true,
             },
-            Err(_) => Self::empty_load_response(request.slot),
+            Err(_) => {
+                Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z)
+            }
         }
     }
 
@@ -169,9 +176,36 @@ impl IoWorker {
         }
     }
 
-    fn empty_load_response(slot: usize) -> LoadResponse {
-        LoadResponse {
+    /// Отвечает отказом на все входящие запросы, пока не придёт сигнал остановки.
+    ///
+    /// Нужен, когда файл мира недоступен: без ответов слоты навсегда останутся
+    /// в `Loading`, и `initial_copy_system` не даст стартовать.
+    fn fail_all_requests(channels: WorkerChannels, shutdown: Arc<AtomicBool>) {
+        while !shutdown.load(Ordering::Acquire) {
+            while let Ok(request) = channels.load_receiver.try_recv() {
+                let response =
+                    Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
+                channels.load_response_sender.send(response).ok();
+            }
+
+            while let Ok(request) = channels.save_receiver.try_recv() {
+                channels
+                    .save_response_sender
+                    .send(SaveResponse {
+                        slot: request.slot,
+                        success: false,
+                    })
+                    .ok();
+            }
+
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    fn empty_load_response(slot: usize, chunk_x: usize, chunk_z: usize) -> LoadResponse {        LoadResponse {
             slot,
+            chunk_x,
+            chunk_z,
             data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
             min_solid_y: 0,
             max_solid_y: 0,

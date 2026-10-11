@@ -9,7 +9,7 @@ use crate::render::{
 use crate::render::mesh_storage::MeshStorage;
 use crate::render::render_systems::{
     process_mesh_events_system, build_meshes_system, swap_meshes_system,
-    update_mesh_entities_system, cleanup_mesh_entities_system,
+    update_mesh_entities_system,
 };
 
 use crate::voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
@@ -281,7 +281,6 @@ impl Plugin for TorxelPlugin {
                 build_meshes_system,
                 swap_meshes_system,
                 update_mesh_entities_system,
-                cleanup_mesh_entities_system,
             )
                 .chain()
                 .in_set(ParallelWorkSet::Render),

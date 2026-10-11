@@ -95,6 +95,7 @@ pub fn update_window_system(
     controller: Res<CameraController>,
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     mut swap_signal: ResMut<SwapSignal>,
+    pipeline: Res<ComputePipeline>,
 ) {
     if !initialized.done {
         return;
@@ -108,8 +109,12 @@ pub fn update_window_system(
     let desired_cx = desired_nx as i64;
     let desired_cz = desired_nz as i64;
 
-    let window_changed =
-        desired_cx != manager.window_center_x || desired_cz != manager.window_center_z;
+    // Сдвиг окна только когда конвейер готов: при AwaitingSwap свап ещё не прошёл,
+    // read-снапшот окна устарел, и ChunkUnloaded удалил бы меши чанков, которые
+    // рендер пока считает активными. Разбор очередей ниже идёт всегда — иначе
+    // AwaitingSave-слоты не уйдут в воркер и фаза не вернётся в Computing.
+    let window_changed = pipeline.phase == ComputePhase::Computing
+        && (desired_cx != manager.window_center_x || desired_cz != manager.window_center_z);
 
     let mut swap_needed = false;
 
@@ -219,6 +224,7 @@ pub fn update_window_system(
 
         if state == SlotState::Queued {
             manager.metadata[request.slot].is_active = true;
+            manager.metadata[request.slot].load_frames = 0;
             manager.set_slot_state(request.slot, SlotState::Loading);
             io_manager.queue_load(request);
         }

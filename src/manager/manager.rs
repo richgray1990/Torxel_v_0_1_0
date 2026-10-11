@@ -63,6 +63,13 @@ impl ChunkManager {
 
     #[inline(always)]
     pub fn chunk_key(&self, chunk_x: usize, chunk_z: usize) -> usize {
+        debug_assert!(
+            chunk_x < self.topology.chunks_x as usize && chunk_z < self.topology.chunks_z as usize,
+            "chunk_key: coordinates must be normalized, got ({}, {})",
+            chunk_x,
+            chunk_z
+        );
+
         chunk_z * self.topology.chunks_x as usize + chunk_x
     }
 
@@ -105,6 +112,16 @@ impl ChunkManager {
         } else {
             None
         }
+    }
+
+    /// Возвращает слот только если чанк в активном окне.
+    ///
+    /// Деактивация (сдвиг окна) не меняет `state` слота, поэтому `slot_for_chunk`
+    /// отдаёт и выгружаемые чанки. Для чтения/записи ячеек нужен именно этот вариант.
+    #[inline(always)]
+    pub fn active_slot_for_chunk(&self, chunk_x: usize, chunk_z: usize) -> Option<usize> {
+        self.slot_for_chunk(chunk_x, chunk_z)
+            .filter(|&slot| self.metadata[slot].is_active)
     }
 
     /// Назначает чанк на свободный слот.
@@ -188,11 +205,15 @@ impl ChunkManager {
     /// Помечает чанк изменённым.
     ///
     /// Вызывать один раз на чанк за кадр, а не на каждую ячейку.
+    /// Единственная точка, где выставляется `file_dirty`: содержимое разошлось с файлом
+    /// только когда чанк кто-то изменил. Любой новый путь записи в `WriteWorld`
+    /// обязан звать `touch_slot`, иначе правка потеряется при выгрузке.
     #[inline(always)]
     pub fn touch_slot(&mut self, slot: usize) {
         let meta = &mut self.metadata[slot];
         meta.generation = meta.generation.wrapping_add(1);
         meta.pending_b_dirty = true;
+        meta.file_dirty = true;
     }
 
     /// Проверка: есть ли хоть один слот в состоянии Saving.
@@ -209,7 +230,7 @@ impl ChunkManager {
         z: i64,
     ) -> Option<&'a Cell> {
         let (cx, cz, lx, ly, lz) = self.topology.normalize_block(x, y, z)?;
-        let slot = self.slot_for_chunk(cx, cz)?;
+        let slot = self.active_slot_for_chunk(cx, cz)?;
         let cell_idx = self.topology.cell_index(lx, ly, lz);
 
         if self.get_slot_state(slot) != SlotState::Ready {
@@ -232,7 +253,7 @@ impl ChunkManager {
             return false;
         };
 
-        let Some(slot) = self.slot_for_chunk(cx, cz) else {
+        let Some(slot) = self.active_slot_for_chunk(cx, cz) else {
             return false;
         };
 

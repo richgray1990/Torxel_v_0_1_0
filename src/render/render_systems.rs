@@ -246,6 +246,11 @@ pub fn update_mesh_entities_system(
             Some(entity) => {
                 if let Ok(mut transform) = transforms.get_mut(entity) {
                     transform.translation = position;
+                } else {
+                    // Сущность удалена извне (деспавн меша). Ссылку надо сбросить,
+                    // иначе она останется навсегда: ветка None ниже её не пересоздаст,
+                    // а позиция такого меша больше никогда не обновится.
+                    data.entity = None;
                 }
             }
             None => {
@@ -258,27 +263,6 @@ pub fn update_mesh_entities_system(
                     ))
                     .id();
                 data.entity = Some(entity);
-            }
-        }
-    }
-}
-
-pub fn cleanup_mesh_entities_system(
-    mut mesh_storage: ResMut<MeshStorage>,
-    mut commands: Commands,
-) {
-    let mut to_remove: Vec<SubchunkKey> = Vec::new();
-
-    for (key, data) in mesh_storage.subchunks.iter() {
-        if data.state == SubchunkRenderState::Unloading {
-            to_remove.push(*key);
-        }
-    }
-
-    for key in to_remove {
-        if let Some(data) = mesh_storage.remove(&key) {
-            if let Some(entity) = data.entity {
-                commands.entity(entity).despawn();
             }
         }
     }

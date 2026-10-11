@@ -63,13 +63,17 @@ pub fn post_swap_copy_system(
         return;
     }
 
-    // Собираем грязные слоты
+    // Собираем грязные слоты.
+    //
+    // `file_dirty` здесь НЕ ставим: `pending_b_dirty` означает «write-сторона разошлась
+    // с read», и выставляется он в том числе при загрузке чанка с диска. Записывать такой
+    // чанк обратно в файл нечего — его туда только что прочитали. `file_dirty` ставит
+    // только `touch_slot`, то есть реальное изменение мира.
     let mut dirty_mask = DirtyMask::new();
 
     for i in 0..POOL_CHUNK_COUNT {
         if manager.is_pending_b_dirty(i) {
             dirty_mask.set(i);
-            manager.set_file_dirty(i, true);
         }
     }
 
