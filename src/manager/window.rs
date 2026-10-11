@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 
-use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::format::{POOL_CHUNK_COUNT, CHUNK_HEIGHT};
 use crate::voxel::topology::TorusTopology;
 
 use super::{ChunkManager, SlotMetadata, SlotState};
@@ -15,6 +15,17 @@ pub struct ReadSlotSnapshot {
     pub grid_z: i64,
     pub state: SlotState,
     pub generation: u64,
+
+    /// Высотные границы содержимого чанка. Используются мешированием, чтобы
+    /// не сканировать пустые субчанки. Живут в снапшоте, а не в `ChunkManager`,
+    /// потому что иначе система мешей получила бы конфликт доступа с пост-свапом.
+    pub min_solid_y: u16,
+    pub max_solid_y: u16,
+    pub min_liquid_y: u16,
+    pub max_liquid_y: u16,
+
+    /// Границы недостоверны (чанк правили после загрузки) — сканировать весь чанк.
+    pub bounds_stale: bool,
 }
 
 impl ReadSlotSnapshot {
@@ -25,6 +36,11 @@ impl ReadSlotSnapshot {
             grid_z: -1,
             state: SlotState::Empty,
             generation: 0,
+            min_solid_y: CHUNK_HEIGHT as u16,
+            max_solid_y: 0,
+            min_liquid_y: CHUNK_HEIGHT as u16,
+            max_liquid_y: 0,
+            bounds_stale: true,
         }
     }
 
@@ -35,6 +51,11 @@ impl ReadSlotSnapshot {
             grid_z: meta.grid_z,
             state: meta.get_state(),
             generation: meta.generation,
+            min_solid_y: meta.min_solid_y,
+            max_solid_y: meta.max_solid_y,
+            min_liquid_y: meta.min_liquid_y,
+            max_liquid_y: meta.max_liquid_y,
+            bounds_stale: meta.bounds_stale,
         }
     }
 }
@@ -155,5 +176,24 @@ impl ReadWindowManager {
     #[inline(always)]
     pub fn is_ready(&self, slot: usize) -> bool {
         self.snapshots[slot].state == SlotState::Ready
+    }
+
+    /// Диапазон `y` с содержимым чанка, или `None` если границы недостоверны.
+    ///
+    /// `None` — чанк правили после загрузки, границы врáли бы, надо сканировать
+    /// весь чанк. Пустой чанк даёт `Some((CHUNK_HEIGHT, 0))`, что вместе с условием
+    /// скипа (`sub_y_end <= min || sub_y > max`) отсекает все субчанки.
+    #[inline(always)]
+    pub fn content_y_range(&self, slot: usize) -> Option<(u16, u16)> {
+        let snap = &self.snapshots[slot];
+
+        if snap.bounds_stale {
+            return None;
+        }
+
+        Some((
+            snap.min_solid_y.min(snap.min_liquid_y),
+            snap.max_solid_y.max(snap.max_liquid_y),
+        ))
     }
 }

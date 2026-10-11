@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use crate::systems::perf::{Bucket, PerfStats};
+
 // use crate::manager::{ChunkManager, SlotState};
 // use crate::queues::mesh_queue::MeshUpdateQueue;
 // use crate::render::camera::CameraController;
@@ -28,6 +30,7 @@ impl Default for DebugTimer {
 pub fn debug_report_system(
     time: Res<Time>,
     mut timer: ResMut<DebugTimer>,
+    stats: Res<PerfStats>,
     // manager: Res<ChunkManager>,
     // read_world: Res<ReadWorld>,
     // write_world: Res<WriteWorld>,
@@ -42,10 +45,15 @@ pub fn debug_report_system(
     // dimensions: Option<Res<WorldDimensions>>,
     // transforms: Query<&Transform>,
 ) {
+    // Полное время кадра — опорная точка для остальных бакетов.
+    stats.record(Bucket::Frame, time.delta());
+
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
         return;
     }
+
+    stats.report_and_reset();
 
     // println!("\n═══════════════ DEBUG REPORT ═══════════════");
 

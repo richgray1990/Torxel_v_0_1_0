@@ -31,12 +31,20 @@ pub struct LoadResponse {
 }
 
 /// Запрос на сохранение чанка (активный пул)
+///
+/// Высотные границы обязаны попасть в заголовок чанка на диске: при следующей
+/// загрузке по ним меширование пропускает пустые субчанки. Без них границы
+/// прочитались бы как нули и содержимое выше первого субчанка пропало бы.
 #[derive(Clone, Debug)]
 pub struct SaveRequest {
     pub slot: usize,
     pub chunk_x: usize,
     pub chunk_z: usize,
     pub data: Vec<Cell>,
+    pub min_solid_y: u16,
+    pub max_solid_y: u16,
+    pub min_liquid_y: u16,
+    pub max_liquid_y: u16,
 }
 
 /// Ответ на сохранение чанка (активный пул)

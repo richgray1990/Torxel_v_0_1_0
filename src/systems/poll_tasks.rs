@@ -5,6 +5,7 @@ use crate::io::channels::IoManager;
 use crate::io::staging::ActiveStagingBuffer;
 use crate::voxel::pool::WriteWorld;
 use crate::manager::{ChunkManager, SlotState};
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Система опроса фоновых задач активного пула.
 pub fn poll_background_tasks_system(
@@ -12,7 +13,9 @@ pub fn poll_background_tasks_system(
     mut staging: ResMut<ActiveStagingBuffer>,
     mut write_world: ResMut<WriteWorld>,
     mut manager: ResMut<ChunkManager>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     // Забираем ответы на загрузку из канала.
     while let Some(response) = io_manager.try_recv_load_response() {
         let slot = response.slot;
@@ -86,6 +89,8 @@ pub fn poll_background_tasks_system(
             manager.set_slot_state(slot, SlotState::Failed);
         }
     }
+
+    stats.record(Bucket::PollTasks, t.elapsed());
 }
 
 /// Слот всё ещё грузит тот же чанк, который запрашивал ответ.

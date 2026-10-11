@@ -208,12 +208,16 @@ impl ChunkManager {
     /// Единственная точка, где выставляется `file_dirty`: содержимое разошлось с файлом
     /// только когда чанк кто-то изменил. Любой новый путь записи в `WriteWorld`
     /// обязан звать `touch_slot`, иначе правка потеряется при выгрузке.
+    ///
+    /// Также помечает высотные границы недостоверными: правка могла занести блок
+    /// выше `max_solid_y`, и меширование обязано перестать им доверять.
     #[inline(always)]
     pub fn touch_slot(&mut self, slot: usize) {
         let meta = &mut self.metadata[slot];
         meta.generation = meta.generation.wrapping_add(1);
         meta.pending_b_dirty = true;
         meta.file_dirty = true;
+        meta.bounds_stale = true;
     }
 
     /// Проверка: есть ли хоть один слот в состоянии Saving.

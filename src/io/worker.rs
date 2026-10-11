@@ -160,10 +160,16 @@ impl IoWorker {
             return SaveResponse { slot: request.slot, success: false };
         }
 
-        let chunk_header = ChunkHeader::new(
-            (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32,
-            CELLS_PER_CHUNK as u32,
-        );
+        let chunk_header = ChunkHeader {
+            min_solid_y: request.min_solid_y,
+            max_solid_y: request.max_solid_y,
+            min_liquid_y: request.min_liquid_y,
+            max_liquid_y: request.max_liquid_y,
+            ..ChunkHeader::new(
+                (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32,
+                CELLS_PER_CHUNK as u32,
+            )
+        };
         let header_bytes: &[u8] = bytemuck::bytes_of(&chunk_header);
         if file.write_all(header_bytes).is_err() {
             return SaveResponse { slot: request.slot, success: false };

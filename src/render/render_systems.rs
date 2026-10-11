@@ -10,9 +10,10 @@ use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, 
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
     CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
-    SUBCHUNK_SIDE, WorldDimensions,
-};  //-SUBCHUNK_HEIGHT
+    SUBCHUNK_HEIGHT, SUBCHUNK_SIDE, WorldDimensions,
+};
 use crate::voxel::pool::ReadWorld;
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Общий материал для всех субчанков.
 ///
@@ -38,7 +39,10 @@ pub fn process_mesh_events_system(
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     for event in mesh_queue.events.iter() {
         match event.kind {
             MeshUpdateKind::ChunkLoaded => {
@@ -91,6 +95,8 @@ pub fn process_mesh_events_system(
     }
 
     mesh_queue.clear();
+
+    stats.record(Bucket::ProcessMeshEvents, t.elapsed());
 }
 
 pub fn build_meshes_system(
@@ -99,7 +105,9 @@ pub fn build_meshes_system(
     read_world: Res<ReadWorld>,
     read_window: Res<ReadWindowManager>,
     //dimensions: Res<WorldDimensions>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let mut to_build: Vec<SubchunkKey> = Vec::new();
 
     for (key, data) in mesh_storage.subchunks.iter() {
@@ -121,6 +129,23 @@ pub fn build_meshes_system(
 
         if !read_window.is_ready(slot) {
             continue;
+        }
+
+        // Пропускаем субчанки вне диапазона содержимого чанка: геометрии там нет,
+        // а скан всего чанка стоит ~9 мс на сдвиг окна. Диапазон `None` означает
+        // «границы недостоверны» (чанк правили) — тогда сканируем как раньше.
+        if let Some((min_y, max_y)) = read_window.content_y_range(slot) {
+            let sub_y = (key.subchunk_index / SUBCHUNKS_X % SUBCHUNKS_Y) * SUBCHUNK_HEIGHT;
+            let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
+
+            if sub_y > max_y as usize || sub_y_end <= min_y as usize {
+                // Субчанк пуст — помечаем Ready без меша, иначе его будут
+                // пытаться собрать каждый кадр.
+                data.current_mesh = None;
+                data.pending_mesh = None;
+                data.state = SubchunkRenderState::Ready;
+                continue;
+            }
         }
 
         let mesh_data = build_subchunk_mesh(
@@ -166,13 +191,17 @@ pub fn build_meshes_system(
             _ => {}
         }
     }
+
+    stats.record(Bucket::BuildMeshes, t.elapsed());
 }
 
 pub fn swap_meshes_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let mut to_swap: Vec<SubchunkKey> = Vec::new();
 
     for (key, data) in mesh_storage.subchunks.iter() {
@@ -202,6 +231,8 @@ pub fn swap_meshes_system(
         }
         data.state = SubchunkRenderState::Ready;
     }
+
+    stats.record(Bucket::SwapMeshes, t.elapsed());
 }
 
 pub fn update_mesh_entities_system(
@@ -211,7 +242,10 @@ pub fn update_mesh_entities_system(
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
     mut transforms: Query<&mut Transform>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     for (key, data) in mesh_storage.subchunks.iter_mut() {
         if data.state != SubchunkRenderState::Ready {
             continue;
@@ -266,6 +300,8 @@ pub fn update_mesh_entities_system(
             }
         }
     }
+
+    stats.record(Bucket::UpdateMeshEntities, t.elapsed());
 }
 
 fn find_chunk_slot(window: &ReadWindowManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {

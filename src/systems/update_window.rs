@@ -8,6 +8,7 @@ use crate::io::file_format::WorldHeader;
 use crate::manager::{ChunkManager, SlotState, UNLOAD_DELAY_FRAMES};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
 use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Флаг инициализации окна.
 #[derive(Resource, Default)]
@@ -96,8 +97,12 @@ pub fn update_window_system(
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     mut swap_signal: ResMut<SwapSignal>,
     pipeline: Res<ComputePipeline>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     if !initialized.done {
+        stats.record(Bucket::UpdateWindow, t.elapsed());
         return;
     }
 
@@ -241,4 +246,6 @@ pub fn update_window_system(
             io_manager.queue_save(request);
         }
     }
+
+    stats.record(Bucket::UpdateWindow, t.elapsed());
 }

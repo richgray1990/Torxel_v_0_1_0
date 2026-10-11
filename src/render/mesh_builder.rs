@@ -11,9 +11,13 @@ use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
 
+/// Теоретическая верхняя граница вершин в субчанке (все ячейки — отдельные кубы).
+/// Не используется для резервирования: реальный субчанк заполнен на доли процента,
+/// и резерв по этому потолку стоит ~5 МБ на вызов.
 pub const MAX_VERTICES_PER_SUBCHUNK: usize =
     SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 4;
 
+/// Теоретическая верхняя граница индексов в субчанке. См. `MAX_VERTICES_PER_SUBCHUNK`.
 pub const MAX_INDICES_PER_SUBCHUNK: usize =
     SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 6;
 
@@ -53,13 +57,18 @@ pub struct SubchunkMeshData {
 }
 
 impl SubchunkMeshData {
+    /// Без предварительного резерва.
+    ///
+    /// Пустой субчанк тогда не аллоцирует вообще ничего, а их 31 из 32 (геометрия
+    /// мира лежит в первой субчанковой полосе). Резерв по `MAX_*` стоил бы ~5 МБ
+    /// на каждый вызов, то есть гигабайты churn за один сдвиг окна.
     pub fn new() -> Self {
         Self {
-            positions: Vec::with_capacity(MAX_VERTICES_PER_SUBCHUNK),
-            normals: Vec::with_capacity(MAX_VERTICES_PER_SUBCHUNK),
-            uvs: Vec::with_capacity(MAX_VERTICES_PER_SUBCHUNK),
-            colors: Vec::with_capacity(MAX_VERTICES_PER_SUBCHUNK),
-            indices: Vec::with_capacity(MAX_INDICES_PER_SUBCHUNK),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: Vec::new(),
+            indices: Vec::new(),
         }
     }
 

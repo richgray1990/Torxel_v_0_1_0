@@ -9,6 +9,7 @@ use crate::manager::{ChunkManager, ReadWindowManager};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, RenderSource};
 use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Фаза 1: Мгновенный обмен указателей пулов.
 ///
@@ -21,14 +22,19 @@ pub fn swap_pointers_system(
     mut pipeline: ResMut<ComputePipeline>,
     manager: Res<ChunkManager>,
     mut read_window: ResMut<ReadWindowManager>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     if !signal.requested {
+        stats.record(Bucket::SwapPointers, t.elapsed());
         return;
     }
 
     // Если есть незавершённые сохранения — откладываем свап
     if manager.has_saving_slots() {
         pipeline.phase = ComputePhase::AwaitingSwap;
+        stats.record(Bucket::SwapPointers, t.elapsed());
         return;
     }
 
@@ -41,6 +47,8 @@ pub fn swap_pointers_system(
     // Свап состоялся, рендер уже может читать новые данные
     signal.requested = false;
     pipeline.phase = ComputePhase::AwaitingPostSwap;
+
+    stats.record(Bucket::SwapPointers, t.elapsed());
 }
 
 /// Фаза 2: Копирование грязных чанков из нового ReadWorld в новый WriteWorld.
@@ -57,9 +65,13 @@ pub fn post_swap_copy_system(
     mut manager: ResMut<ChunkManager>,
     mut dirty_buffer: ResMut<PostSwapDirtyBuffer>,
     mut pipeline: ResMut<ComputePipeline>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     // Работаем только если свап состоялся
     if pipeline.phase != ComputePhase::AwaitingPostSwap {
+        stats.record(Bucket::PostSwapCopy, t.elapsed());
         return;
     }
 
@@ -98,4 +110,6 @@ pub fn post_swap_copy_system(
 
     // Готово — обсчёт может работать
     pipeline.phase = ComputePhase::Computing;
+
+    stats.record(Bucket::PostSwapCopy, t.elapsed());
 }

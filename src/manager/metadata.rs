@@ -47,6 +47,10 @@ pub struct SlotMetadata {
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
 
+    /// Границы выше стали недостоверны (чанк правили после загрузки).
+    /// При `true` меширование сканирует весь чанк, а не только диапазон содержимого.
+    pub bounds_stale: bool,
+
     pub generation: u64,
 }
 
@@ -67,6 +71,7 @@ impl SlotMetadata {
             max_solid_y: 0,
             min_liquid_y: CHUNK_HEIGHT as u16,
             max_liquid_y: 0,
+            bounds_stale: false,
             generation: 0,
         }
     }

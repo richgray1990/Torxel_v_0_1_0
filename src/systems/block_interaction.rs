@@ -16,7 +16,7 @@ use crate::manager::ReadWindowManager;
 use crate::queues::cell_events::{CellEvent, CellEventQueue};
 use crate::render::camera::CameraController;
 use crate::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, WorldDimensions};
-use crate::voxel::materials::{ids, phases};
+use crate::voxel::materials::{ids};//-, phases
 use crate::voxel::pool::ReadWorld;
 
 /// Максимальная дальность луча в блоках.
@@ -173,7 +173,7 @@ pub fn block_interaction_system(
     if remove_pressed {
         let mut cell = Cell::zeroed();
         cell.material_id = ids::AIR;
-        cell.phase_state = phases::SOLID;
+        //cell.phase_state = phases::SOLID;
 
         events.push(CellEvent::set_cell_expected(
             hit.slot,
@@ -201,7 +201,7 @@ pub fn block_interaction_system(
 
         let mut cell = Cell::zeroed();
         cell.material_id = ids::STONE;
-        cell.phase_state = phases::SOLID;
+        //cell.phase_state = phases::SOLID;
 
         events.push(CellEvent::set_cell_expected(
             hit.slot,

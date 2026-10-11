@@ -8,6 +8,7 @@ use crate::manager::{ChunkManager, DirtyMask, SlotState};
 use crate::queues::cell_events::CellEventQueue;
 use crate::voxel::format::subchunk_index_from_cell;
 use crate::voxel::pool::WriteWorld;
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Система применения событий ячеек к WriteWorld.
 ///
@@ -22,7 +23,9 @@ pub fn apply_cell_events_system(
     mut write_world: ResMut<WriteWorld>,
     mut cell_events: ResMut<CellEventQueue>,
     mut manager: ResMut<ChunkManager>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let mut touched_slots = DirtyMask::new();
 
     for event in cell_events.drain() {
@@ -64,4 +67,6 @@ pub fn apply_cell_events_system(
     for slot in touched_slots.iter_set() {
         manager.touch_slot(slot);
     }
+
+    stats.record(Bucket::ApplyCellEvents, t.elapsed());
 }

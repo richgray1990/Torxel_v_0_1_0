@@ -128,7 +128,7 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
                 }
                 
                 cells[cell_index].material_id = material;
-                cells[cell_index].phase_state = if material == AIR { GAS } else { SOLID };
+                //cells[cell_index].phase_state = if material == AIR { GAS } else { SOLID };
 
                 if material != AIR {
                     let y = ly as u16;
@@ -184,7 +184,7 @@ fn set_tower(
                 if ly < CHUNK_HEIGHT {
                     let idx = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
                     cells[idx].material_id = CLAY;
-                    cells[idx].phase_state = SOLID;
+                    //cells[idx].phase_state = SOLID;
                 }
             }
         }

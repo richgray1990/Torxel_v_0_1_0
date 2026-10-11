@@ -8,15 +8,20 @@ use bevy::prelude::*;
 use crate::manager::{ChunkManager, SlotState};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
 use crate::voxel::format::{all_subchunks_mask, POOL_CHUNK_COUNT};
+use crate::systems::perf::{Bucket, PerfStats};
 
 pub fn dispatch_loaded_events_system(
     mut manager: ResMut<ChunkManager>,
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     initial_copy: Res<crate::systems::initial_copy::InitialCopyDone>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     // Не отправляем события пока initial_copy не завершён.
     // Иначе меш построится из пустого ReadWorld.
     if !initial_copy.done {
+        stats.record(Bucket::DispatchLoaded, t.elapsed());
         return;
     }
 
@@ -60,4 +65,6 @@ pub fn dispatch_loaded_events_system(
         // Помечаем, что уведомление отправлено.
         manager.metadata[slot].render_notified = true;
     }
+
+    stats.record(Bucket::DispatchLoaded, t.elapsed());
 }

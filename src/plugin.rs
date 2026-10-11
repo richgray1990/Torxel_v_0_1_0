@@ -30,7 +30,7 @@ use crate::systems::{
     dispatch_loaded_events_system, block_interaction_system, init_highlight_system,
     initial_copy_system, initialize_window_system, poll_background_tasks_system,
     post_swap_copy_system, request_swap_system, swap_pointers_system, update_window_system,
-    HighlightState, InitialCopyDone, WindowInitialized,
+    HighlightState, InitialCopyDone, WindowInitialized, PerfStats,
 };
 use crate::systems::debug::{debug_report_system, DebugTimer};
 
@@ -140,6 +140,7 @@ impl Plugin for TorxelPlugin {
         app.init_resource::<CameraController>();
         app.init_resource::<MeshStorage>();
         app.init_resource::<DebugTimer>();
+        app.init_resource::<PerfStats>();
 
         app.init_resource::<HighlightState>();
 

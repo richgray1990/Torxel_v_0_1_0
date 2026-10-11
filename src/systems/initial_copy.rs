@@ -6,6 +6,7 @@ use crate::voxel::pool::{ReadWorld, WriteWorld};
 
 use crate::manager::{ChunkManager, ReadWindowManager, SlotState};
 use crate::signals::{ComputePhase, ComputePipeline};
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Флаг завершения начального копирования.
 #[derive(Resource, Default)]
@@ -21,7 +22,10 @@ pub fn initial_copy_system(
     mut read_window: ResMut<ReadWindowManager>,
     mut pipeline: ResMut<ComputePipeline>,
     mut initial_copy: ResMut<InitialCopyDone>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
+
     if initial_copy.done {
         return;
     }
@@ -32,6 +36,7 @@ pub fn initial_copy_system(
     });
 
     if !all_resolved {
+        stats.record(Bucket::InitialCopy, t.elapsed());
         return;
     }
 
@@ -59,4 +64,6 @@ pub fn initial_copy_system(
 
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;
+
+    stats.record(Bucket::InitialCopy, t.elapsed());
 }

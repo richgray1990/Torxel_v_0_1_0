@@ -6,13 +6,16 @@ use crate::voxel::pool::ReadWorld;
 use crate::io::channels::SaveRequest;
 use crate::manager::{ChunkManager, SlotState, LOAD_TIMEOUT_FRAMES};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
+use crate::systems::perf::{Bucket, PerfStats};
 
 /// Система сборки мусора.
 pub fn chunk_garbage_collector_system(
     mut manager: ResMut<ChunkManager>,
     read_world: Res<ReadWorld>,
     mut mesh_queue: ResMut<MeshUpdateQueue>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     for slot in 0..POOL_CHUNK_COUNT {
         let (state, is_active, unload_timer, file_dirty, grid_x, grid_z) = {
             let meta = &manager.metadata[slot];
@@ -78,11 +81,23 @@ pub fn chunk_garbage_collector_system(
             // Чанк грязный — отправляем на сохранение.
             let data = read_world.0.chunk_slice(slot).to_vec();
 
+            let meta = &manager.metadata[slot];
+            let (min_solid_y, max_solid_y, min_liquid_y, max_liquid_y) = (
+                meta.min_solid_y,
+                meta.max_solid_y,
+                meta.min_liquid_y,
+                meta.max_liquid_y,
+            );
+
             manager.save_queue.push(SaveRequest {
                 slot,
                 chunk_x: grid_x as usize,
                 chunk_z: grid_z as usize,
                 data,
+                min_solid_y,
+                max_solid_y,
+                min_liquid_y,
+                max_liquid_y,
             });
 
             manager.set_slot_state(slot, SlotState::AwaitingSave);
@@ -101,4 +116,6 @@ pub fn chunk_garbage_collector_system(
             manager.release_slot(slot);
         }
     }
+
+    stats.record(Bucket::Gc, t.elapsed());
 }

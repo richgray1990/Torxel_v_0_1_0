@@ -180,24 +180,24 @@ pub struct Cell {
     pub direction: u8,           // Направление / ориентация
     
     // === Жидкости и фаза (2 байта) ===
-    pub liquid_level: u8,        // Уровень жидкости (0-8)
-    pub phase_state: u8,         // Фаза (твёрдое/жидкое/газ)
+    //pub liquid_level: u8,        // Уровень жидкости (0-8)
+    //pub phase_state: u8,         // Фаза (твёрдое/жидкое/газ)
     
     // === Физика (3 байта) ===
-    pub temperature: u16,        // Температура
-    pub humidity: u8,            // Влажность
+    //pub temperature: u16,        // Температура
+    //pub humidity: u8,            // Влажность
     
     // === Состояние (2 байта) ===
-    pub damage: u8,              // Повреждение
-    pub state: u8,               // Основное состояние
+    //pub damage: u8,              // Повреждение
+    //pub state: u8,               // Основное состояние
     
     // === Метаданные (3 байта) ===
-    pub additional_bitmap: u8,   // Флаги (is_natural и др.)
-    pub age: u16,                // Возраст
+    //pub additional_bitmap: u8,   // Флаги (is_natural и др.)
+    //pub age: u16,                // Возраст
     
     // === Дополнительные данные (2 байта) ===
-    pub additional_state: u8,    // Дополнительное состояние / эффект
-    pub metadata: u8,            // Флаги, метаданные, соединения
+    //pub additional_state: u8,    // Дополнительное состояние / эффект
+    //pub metadata: u8,            // Флаги, метаданные, соединения
     
     // === Внешние ссылки (1 байт) ===
     pub external_id: u8,         // ID внешней сущности (моды, сложные блоки)
