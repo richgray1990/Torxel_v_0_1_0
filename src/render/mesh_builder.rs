@@ -6,6 +6,7 @@ use crate::voxel::format::{
     CHUNK_HEIGHT, CHUNK_SIDE, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE,
     SUBCHUNKS_X, SUBCHUNKS_Y,
 };
+use crate::voxel::height_map::column_index;
 use crate::voxel::materials::{get_material, ids, is_transparent};
 use crate::voxel::pool::ChunkPool;
 
@@ -139,6 +140,7 @@ pub fn build_subchunk_mesh(
     //slot: usize,
     chunk_x: i64,
     chunk_z: i64,
+    slot: usize,
     window: &ReadWindowManager,
 ) -> SubchunkMeshData {
     let mut mesh_data = SubchunkMeshData::new();
@@ -149,13 +151,29 @@ pub fn build_subchunk_mesh(
 
     fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
 
+    let tops = window.height_map.column_slice(slot);
+    let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
+
     for lz in sub_z..sub_z + SUBCHUNK_SIDE {
         for lx in sub_x..sub_x + SUBCHUNK_SIDE {
-            for ly in sub_y..sub_y + SUBCHUNK_HEIGHT {
-                // Локальные координаты внутри субчанка и соответствующие им +1 в halo.
-                let hx = lx - sub_x + 1;
+            // Верхний воздушный `y` колонки: выше него блоков нет по определению
+            // карты. `0` — колонка пуста, вся пропускается.
+            let col = column_index(lx - sub_x, lz - sub_z);
+            let top_y = tops[col] as usize;
+
+            if top_y <= sub_y {
+                continue;
+            }
+
+            // Внутри полосы колонку не имеет смысла сканировать выше `top_y`.
+            let y_end = top_y.min(sub_y_end);
+
+            // Локальные координаты внутри субчанка и соответствующие им +1 в halo.
+            let hx = lx - sub_x + 1;
+            let hz = lz - sub_z + 1;
+
+            for ly in sub_y..y_end {
                 let hy = ly - sub_y + 1;
-                let hz = lz - sub_z + 1;
 
                 let material_id = halo.get(hx, hy, hz);
 

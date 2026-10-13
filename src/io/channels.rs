@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use flume::{Receiver, Sender};
 
 use crate::voxel::format::Cell;
+use crate::voxel::height_map::COLUMNS_PER_CHUNK;
 
 /// Запрос на загрузку чанка (активный пул)
 #[derive(Clone, Debug)]
@@ -27,6 +28,8 @@ pub struct LoadResponse {
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
+    /// Верхние блоки колонок, посчитанные воркером на горячем кэше.
+    pub column_tops: [u16; COLUMNS_PER_CHUNK],
     pub success: bool,
 }
 
@@ -45,6 +48,8 @@ pub struct SaveRequest {
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
+    /// Карта верхних блоков — едет в заголовок чанка на диске.
+    pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 
 /// Ответ на сохранение чанка (активный пул)

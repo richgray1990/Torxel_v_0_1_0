@@ -5,6 +5,7 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::{POOL_CHUNK_COUNT, CHUNK_HEIGHT};
+use crate::voxel::height_map::HeightMap;
 use crate::voxel::topology::TorusTopology;
 
 use super::{ChunkManager, SlotMetadata, SlotState};
@@ -75,6 +76,14 @@ pub struct ReadWindowManager {
     ///
     /// Содержит только активные Ready чанки.
     pub chunk_to_slot: Vec<i32>,
+
+    /// Снимок карты верхних блоков на момент публикации `ReadWorld`.
+    ///
+    /// Лежит здесь, а не отдельным ресурсом, по той же причине, что и высотные
+    /// границы: мешер читает карту вместе с содержимым пула, и оба обязаны
+    /// относиться к одному моменту времени. Отдельный `Res<ReadHeightMap>`
+    /// конфликтовал бы по доступу с пост-свапом.
+    pub height_map: HeightMap,
 }
 
 impl ReadWindowManager {
@@ -88,6 +97,7 @@ impl ReadWindowManager {
             window_min_z: 0,
             snapshots: vec![ReadSlotSnapshot::free(); POOL_CHUNK_COUNT],
             chunk_to_slot: vec![-1; chunks_x * chunks_z],
+            height_map: HeightMap::new(POOL_CHUNK_COUNT),
         }
     }
 
@@ -96,9 +106,13 @@ impl ReadWindowManager {
     /// Вызывается:
     /// - после initial_copy_system;
     /// - после swap_pointers_system.
-    pub fn publish_from(&mut self, write: &ChunkManager) {
+    pub fn publish_from(&mut self, write: &ChunkManager, write_height_map: &HeightMap) {
         debug_assert_eq!(self.snapshots.len(), write.metadata.len());
         debug_assert_eq!(self.chunk_to_slot.len(), write.chunk_to_slot.len());
+
+        // Карта едет целиком: 512 Б × 1024 слота = 512 КиБ одним memcpy, дешевле
+        // вычисления dirty-маски по слотам.
+        self.height_map.copy_from_all(write_height_map);
 
         self.window_min_x = write.window_min_x;
         self.window_min_z = write.window_min_z;

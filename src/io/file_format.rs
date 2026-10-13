@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
 use crate::voxel::format::{Cell, CELLS_PER_CHUNK};
+use crate::voxel::height_map::COLUMNS_PER_CHUNK;
 
 /// Магическое число заголовка мира
 pub const WORLD_MAGIC: u32 = 0x54584C56; // "TXLV"
@@ -12,7 +13,13 @@ pub const CHUNK_MAGIC: u32 = 0x43484E4B; // "CHNK"
 
 /// Текущая версия формата
 pub const FORMAT_VERSION: u32 = 1;
-pub const CHUNK_VERSION: u16 = 1;
+
+/// Версия заголовка чанка.
+///
+/// 2 — заголовок несёт `column_tops` и весит 540 Б вместо 32. Чанки старого файла
+/// лежат по другому смещению, поэтому `is_valid` обязан их отсечь: иначе ячейки
+/// читались бы с середины чужого заголовка.
+pub const CHUNK_VERSION: u16 = 2;
 
 /// Флаги чанка
 pub mod chunk_flags {
@@ -35,15 +42,19 @@ pub struct ChunkHeader {
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
-    pub _padding: [u8; 4],
+    /// Верхний блок каждой колонки: `top_block_y + 1`, `0` — колонка пуста.
+    ///
+    /// Считает генератор, хранится в файле. Позволяет мешингу пропускать
+    /// колонки, лежащие ниже обрабатываемой полосы, без скана ячеек.
+    pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 
 unsafe impl Pod for ChunkHeader {}
 unsafe impl Zeroable for ChunkHeader {}
 
 const _: () = assert!(
-    std::mem::size_of::<ChunkHeader>() == 32,
-    "ChunkHeader must be exactly 32 bytes"
+    std::mem::size_of::<ChunkHeader>() == 540,
+    "ChunkHeader must be exactly 540 bytes"
 );
 
 impl ChunkHeader {
@@ -59,7 +70,7 @@ impl ChunkHeader {
             max_solid_y: 0,
             min_liquid_y: 0,
             max_liquid_y: 0,
-            _padding: [0; 4],
+            column_tops: [0; COLUMNS_PER_CHUNK],
         }
     }
 
@@ -71,7 +82,6 @@ impl ChunkHeader {
         self.flags & chunk_flags::COMPRESSED != 0
     }
 }
-
 impl Default for ChunkHeader {
     fn default() -> Self {
         Self::new(0, 0)

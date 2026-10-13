@@ -2,6 +2,7 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::height_map::{ReadHeightMap, WriteHeightMap};
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 
 use crate::manager::{ChunkManager, ReadWindowManager, SlotState};
@@ -18,6 +19,8 @@ pub struct InitialCopyDone {
 pub fn initial_copy_system(
     mut read_world: ResMut<ReadWorld>,
     write_world: Res<WriteWorld>,
+    mut read_height_map: ResMut<ReadHeightMap>,
+    write_height_map: Res<WriteHeightMap>,
     mut manager: ResMut<ChunkManager>,
     mut read_window: ResMut<ReadWindowManager>,
     mut pipeline: ResMut<ComputePipeline>,
@@ -47,6 +50,7 @@ pub fn initial_copy_system(
 
         if meta.state == SlotState::Ready && meta.is_active {
             read_world.0.copy_chunk_from(&write_world.0, slot);
+            read_height_map.0.copy_slot_from(&write_height_map.0, slot);
 
             manager.metadata[slot].pending_b_dirty = false;
             manager.metadata[slot].render_notified = false;
@@ -60,7 +64,9 @@ pub fn initial_copy_system(
         copied
     );
 
-    read_window.publish_from(&manager);
+    // Снапшот публикуем с read-стороны: она только что заполнена и совпадает
+    // с тем, что увидит мешер.
+    read_window.publish_from(&manager, &read_height_map.0);
 
     initial_copy.done = true;
     pipeline.phase = ComputePhase::Computing;

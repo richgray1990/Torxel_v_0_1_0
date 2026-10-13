@@ -4,6 +4,7 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::Cell;
+use crate::voxel::height_map::COLUMNS_PER_CHUNK;
 use crate::io::channels::SaveResponse;
 
 /// Загруженный чанк активного пула
@@ -16,6 +17,7 @@ pub struct StagedChunk {
     pub max_solid_y: u16,
     pub min_liquid_y: u16,
     pub max_liquid_y: u16,
+    pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 
 /// Буфер активного пула

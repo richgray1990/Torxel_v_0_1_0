@@ -156,6 +156,7 @@ pub fn build_meshes_system(
             //slot,
             key.chunk_x,//dimensions.width as i64,
             key.chunk_z,//dimensions.depth as i64,
+            slot,
             &read_window,
         );
 

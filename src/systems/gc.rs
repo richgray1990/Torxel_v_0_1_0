@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::pool::ReadWorld;
 use crate::io::channels::SaveRequest;
-use crate::manager::{ChunkManager, SlotState, LOAD_TIMEOUT_FRAMES};
+use crate::manager::{ChunkManager, ReadWindowManager, SlotState, LOAD_TIMEOUT_FRAMES};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
 use crate::systems::perf::{Bucket, PerfStats};
 
@@ -12,6 +12,7 @@ use crate::systems::perf::{Bucket, PerfStats};
 pub fn chunk_garbage_collector_system(
     mut manager: ResMut<ChunkManager>,
     read_world: Res<ReadWorld>,
+    read_window: Res<ReadWindowManager>,
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     stats: Res<PerfStats>,
 ) {
@@ -81,6 +82,11 @@ pub fn chunk_garbage_collector_system(
             // Чанк грязный — отправляем на сохранение.
             let data = read_world.0.chunk_slice(slot).to_vec();
 
+            // Карту берём из read-снапшота: gc сохраняет именно `ReadWorld`, и карта
+            // из `WriteHeightMap` могла бы отстать от записываемых ячеек на кадр.
+            let mut column_tops = [0u16; crate::voxel::height_map::COLUMNS_PER_CHUNK];
+            column_tops.copy_from_slice(read_window.height_map.column_slice(slot));
+
             let meta = &manager.metadata[slot];
             let (min_solid_y, max_solid_y, min_liquid_y, max_liquid_y) = (
                 meta.min_solid_y,
@@ -98,6 +104,7 @@ pub fn chunk_garbage_collector_system(
                 max_solid_y,
                 min_liquid_y,
                 max_liquid_y,
+                column_tops,
             });
 
             manager.set_slot_state(slot, SlotState::AwaitingSave);

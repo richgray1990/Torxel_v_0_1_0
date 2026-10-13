@@ -13,6 +13,8 @@ use crate::render::render_systems::{
 };
 
 use crate::voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
+use crate::voxel::height_map::{HeightMap, ReadHeightMap, WriteHeightMap};
+use crate::voxel::format::POOL_CHUNK_COUNT;
 use crate::voxel::topology::TorusTopology;
 use crate::io::channels::IoManager;
 use crate::io::file_format::WorldHeader;
@@ -119,6 +121,9 @@ impl Plugin for TorxelPlugin {
 
         app.insert_resource(ReadWorld(ChunkPool::new_max()));
         app.insert_resource(WriteWorld(ChunkPool::new_max()));
+
+        app.insert_resource(ReadHeightMap(HeightMap::new(POOL_CHUNK_COUNT)));
+        app.insert_resource(WriteHeightMap(HeightMap::new(POOL_CHUNK_COUNT)));
         
         
         app.insert_resource(ComputePipeline::default());

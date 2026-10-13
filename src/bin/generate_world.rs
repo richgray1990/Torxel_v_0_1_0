@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use bytemuck::Zeroable;
 
 use torxel::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, CELLS_PER_CHUNK};
+use torxel::voxel::height_map::column_tops;
 use torxel::voxel::materials::ids::{AIR, STONE, CLAY};
 //use torxel::voxel::materials::phases::{SOLID, GAS};
 use torxel::io::file_format::{ChunkHeader, WorldHeader};
@@ -163,6 +164,10 @@ fn generate_chunk(chunk_x: i64, chunk_z: i64) -> (Vec<Cell>, ChunkHeader) {
     header.max_solid_y = max_solid;
     header.min_liquid_y = min_liquid;
     header.max_liquid_y = max_liquid;
+
+    // Карта верхних блоков считается здесь один раз: при загрузке чанка её
+    // сканировать не придётся, она читается прямо из заголовка.
+    header.column_tops = column_tops(&cells);
 
     (cells, header)
 }

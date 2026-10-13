@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::height_map::{ReadHeightMap, WriteHeightMap};
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 use crate::manager::masks::DirtyMask;
 use crate::manager::{ChunkManager, ReadWindowManager};
@@ -18,6 +19,8 @@ use crate::systems::perf::{Bucket, PerfStats};
 pub fn swap_pointers_system(
     mut read_world: ResMut<ReadWorld>,
     mut write_world: ResMut<WriteWorld>,
+    mut read_height_map: ResMut<ReadHeightMap>,
+    mut write_height_map: ResMut<WriteHeightMap>,
     mut signal: ResMut<SwapSignal>,
     mut pipeline: ResMut<ComputePipeline>,
     manager: Res<ChunkManager>,
@@ -38,11 +41,16 @@ pub fn swap_pointers_system(
         return;
     }
 
-    // Обмен указателей пулов
+    // Обмен указателей пулов. Карты едут вместе с ними: карта — производное
+    // от содержимого, и разойтись они не имеют права.
     std::mem::swap(&mut read_world.0, &mut write_world.0);
+    std::mem::swap(&mut read_height_map.0, &mut write_height_map.0);
 
-    // Публикуем read-снапшот метаданных
-    read_window.publish_from(&manager);
+    // Публикуем read-снапшот метаданных. Карту берём с read-стороны: после обмена
+    // именно она соответствует текущему `ReadWorld`. `write_height_map` в этот
+    // момент содержит прошлое содержимое слота, и снапшот по нему обрезал бы
+    // геометрию нового чанка высотами предыдущего.
+    read_window.publish_from(&manager, &read_height_map.0);
 
     // Свап состоялся, рендер уже может читать новые данные
     signal.requested = false;
@@ -62,6 +70,8 @@ pub fn swap_pointers_system(
 pub fn post_swap_copy_system(
     read_world: Res<ReadWorld>,
     mut write_world: ResMut<WriteWorld>,
+    read_height_map: Res<ReadHeightMap>,
+    mut write_height_map: ResMut<WriteHeightMap>,
     mut manager: ResMut<ChunkManager>,
     mut dirty_buffer: ResMut<PostSwapDirtyBuffer>,
     mut pipeline: ResMut<ComputePipeline>,
@@ -92,6 +102,7 @@ pub fn post_swap_copy_system(
     // Копируем грязные чанки и складываем события в буфер
     for i in dirty_mask.iter_set() {
         write_world.0.copy_chunk_from(&read_world.0, i);
+        write_height_map.0.copy_slot_from(&read_height_map.0, i);
 
         // Забираем маску грязных субчанков и сбрасываем
         let sub_mask = manager.metadata[i].take_dirty_subchunks();

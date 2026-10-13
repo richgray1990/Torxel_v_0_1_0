@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use crate::io::channels::IoManager;
 use crate::io::staging::ActiveStagingBuffer;
 use crate::voxel::pool::WriteWorld;
+use crate::voxel::height_map::WriteHeightMap;
 use crate::manager::{ChunkManager, SlotState};
 use crate::systems::perf::{Bucket, PerfStats};
 
@@ -12,6 +13,7 @@ pub fn poll_background_tasks_system(
     io_manager: Res<IoManager>,
     mut staging: ResMut<ActiveStagingBuffer>,
     mut write_world: ResMut<WriteWorld>,
+    mut write_height_map: ResMut<WriteHeightMap>,
     mut manager: ResMut<ChunkManager>,
     stats: Res<PerfStats>,
 ) {
@@ -37,6 +39,7 @@ pub fn poll_background_tasks_system(
                 max_solid_y: response.max_solid_y,
                 min_liquid_y: response.min_liquid_y,
                 max_liquid_y: response.max_liquid_y,
+                column_tops: response.column_tops,
             });
         } else {
             manager.set_slot_state(slot, SlotState::Failed);
@@ -56,6 +59,11 @@ pub fn poll_background_tasks_system(
             .0
             .chunk_slice_mut(slot)
             .copy_from_slice(&staged_chunk.data);
+
+        write_height_map
+            .0
+            .column_slice_mut(slot)
+            .copy_from_slice(&staged_chunk.column_tops);
 
         manager.metadata[slot].min_solid_y = staged_chunk.min_solid_y;
         manager.metadata[slot].max_solid_y = staged_chunk.max_solid_y;

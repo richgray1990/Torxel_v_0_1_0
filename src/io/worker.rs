@@ -10,6 +10,7 @@ use std::thread::{self, JoinHandle};
 use bytemuck::Zeroable;
 
 use crate::voxel::format::{Cell, CELLS_PER_CHUNK};
+use crate::voxel::height_map::{column_tops, COLUMNS_PER_CHUNK};
 use super::channels::{
     LoadRequest, LoadResponse, SaveRequest, SaveResponse, WorkerChannels,
 };
@@ -113,12 +114,13 @@ impl IoWorker {
             return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
         }
 
-        let mut chunk_header_bytes = [0u8; 32];
+        let mut chunk_header_bytes = vec![0u8; std::mem::size_of::<ChunkHeader>()];
         if file.read_exact(&mut chunk_header_bytes).is_err() {
             return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
         }
 
-        let chunk_header: &ChunkHeader = bytemuck::from_bytes(&chunk_header_bytes);
+        // `from_bytes` требует выравнивания 4, а `Vec<u8>` выровнен по 1.
+        let chunk_header: ChunkHeader = bytemuck::pod_read_unaligned(&chunk_header_bytes);
 
         if !chunk_header.is_valid() {
             return Self::empty_load_response(request.slot, request.chunk_x, request.chunk_z);
@@ -132,11 +134,12 @@ impl IoWorker {
                 slot: request.slot,
                 chunk_x: request.chunk_x,
                 chunk_z: request.chunk_z,
-                data,
                 min_solid_y: chunk_header.min_solid_y,
                 max_solid_y: chunk_header.max_solid_y,
                 min_liquid_y: chunk_header.min_liquid_y,
                 max_liquid_y: chunk_header.max_liquid_y,
+                column_tops: Self::header_tops(&chunk_header, &data),
+                data,
                 success: true,
             },
             Err(_) => {
@@ -165,6 +168,7 @@ impl IoWorker {
             max_solid_y: request.max_solid_y,
             min_liquid_y: request.min_liquid_y,
             max_liquid_y: request.max_liquid_y,
+            column_tops: request.column_tops,
             ..ChunkHeader::new(
                 (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32,
                 CELLS_PER_CHUNK as u32,
@@ -208,7 +212,21 @@ impl IoWorker {
         }
     }
 
-    fn empty_load_response(slot: usize, chunk_x: usize, chunk_z: usize) -> LoadResponse {        LoadResponse {
+    /// Верхние блоки колонок из заголовка чанка.
+    ///
+    /// Если `max_solid_y > 0`, а карта целиком нулевая — заголовок битый
+    /// (оборванная запись, чанк чужого происхождения). Без пересчёта такой чанк
+    /// дал бы невидимый мир: мешер пропустил бы все колонки как пустые.
+    fn header_tops(header: &ChunkHeader, data: &[Cell]) -> [u16; COLUMNS_PER_CHUNK] {
+        if header.max_solid_y > 0 && header.column_tops.iter().all(|&t| t == 0) {
+            return column_tops(data);
+        }
+
+        header.column_tops
+    }
+
+    fn empty_load_response(slot: usize, chunk_x: usize, chunk_z: usize) -> LoadResponse {
+        LoadResponse {
             slot,
             chunk_x,
             chunk_z,
@@ -217,6 +235,7 @@ impl IoWorker {
             max_solid_y: 0,
             min_liquid_y: 0,
             max_liquid_y: 0,
+            column_tops: [0; crate::voxel::height_map::COLUMNS_PER_CHUNK],
             success: false,
         }
     }
