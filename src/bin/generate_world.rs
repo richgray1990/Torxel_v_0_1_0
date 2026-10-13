@@ -14,7 +14,7 @@ use bytemuck::Zeroable;
 
 use torxel::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, CELLS_PER_CHUNK};
 use torxel::voxel::materials::ids::{AIR, STONE, CLAY};
-use torxel::voxel::materials::phases::{SOLID, GAS};
+//use torxel::voxel::materials::phases::{SOLID, GAS};
 use torxel::io::file_format::{ChunkHeader, WorldHeader};
 
 fn main() {

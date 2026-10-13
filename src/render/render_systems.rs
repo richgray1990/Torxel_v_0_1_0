@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crate::manager::ReadWindowManager;
 use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue};   //-MeshUpdateEvent
 use crate::render::camera::CameraController;
-use crate::render::mesh_builder::build_subchunk_mesh;
+use crate::render::mesh_builder::{build_subchunk_mesh, HaloBuf};
 use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState};
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
@@ -106,6 +106,7 @@ pub fn build_meshes_system(
     read_window: Res<ReadWindowManager>,
     //dimensions: Res<WorldDimensions>,
     stats: Res<PerfStats>,
+    mut halo: Local<HaloBuf>,
 ) {
     let t = std::time::Instant::now();
     let mut to_build: Vec<SubchunkKey> = Vec::new();
@@ -149,9 +150,10 @@ pub fn build_meshes_system(
         }
 
         let mesh_data = build_subchunk_mesh(
+            &mut halo,
             key.subchunk_index,
             &read_world.0,
-            slot,
+            //slot,
             key.chunk_x,//dimensions.width as i64,
             key.chunk_z,//dimensions.depth as i64,
             &read_window,

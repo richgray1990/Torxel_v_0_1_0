@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 const PITCH_SPEED: f32 = 45.0;
-const MOVE_SPEED: f32 = 64.0;
+const MOVE_SPEED: f32 = 128.0;
 const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
 
 /// Масштаб ортографической проекции при зуме 1.0.
