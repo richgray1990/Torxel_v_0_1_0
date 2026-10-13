@@ -5,10 +5,12 @@ use std::collections::HashMap;
 
 use crate::voxel::format::{WINDOW_CHUNK_COUNT, SUBCHUNKS_PER_CHUNK};
 
+/// Максимум субчанков в хранилище: столько записей может быть одновременно.
+pub const MAX_SUBCHUNKS: usize = WINDOW_CHUNK_COUNT * SUBCHUNKS_PER_CHUNK;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SubchunkRenderState {
     Empty,
-    Building,
     Ready,
     Dirty,
     Rebuilding,
@@ -22,6 +24,9 @@ pub struct SubchunkRenderData {
     pub chunk_x: i64,
     pub chunk_z: i64,
     pub subchunk_index: usize,
+    /// Ключ присутствует в `MeshStorage::live`. Защита от дублей: `live`
+    /// долгоживущий, и без флага повторный переход в `Ready` добавил бы ключ дважды.
+    pub in_live: bool,
 }
 
 impl SubchunkRenderData {
@@ -34,6 +39,7 @@ impl SubchunkRenderData {
             chunk_x,
             chunk_z,
             subchunk_index,
+            in_live: false,
         }
     }
 }
@@ -45,17 +51,51 @@ pub struct SubchunkKey {
     pub subchunk_index: usize,
 }
 
+/// Хранилище мешей и рабочие списки.
+///
+/// `subchunks` — источник истины. Списки лишь подсказывают, где есть работа:
+/// состояния `Empty`/`Dirty`/`Rebuilding` уже описывают её, и список строится
+/// в момент перехода, а не переискивается сканом каждый кадр.
+///
+/// Все списки аллоцируются один раз на `MAX_SUBCHUNKS`, `len` растёт и падает
+/// при неизменной ёмкости — в установившемся режиме аллокаций нет.
+///
+/// Инвалидация ленивая: `ChunkUnloaded` списки не чистит (это был бы проход по
+/// трём спискам на каждую выгрузку). Потребитель, не найдя ключ в `subchunks`,
+/// просто выбрасывает его.
 #[derive(Resource)]
 pub struct MeshStorage {
     pub subchunks: HashMap<SubchunkKey, SubchunkRenderData>,
-    pub entity_count: usize,
+
+    /// Субчанки в состоянии `Empty` или `Dirty` — ждут `build_subchunk_mesh`.
+    pub pending_build: Vec<SubchunkKey>,
+
+    /// Субчанки в состоянии `Rebuilding` — ждут подмены `pending_mesh`.
+    pub pending_swap: Vec<SubchunkKey>,
+
+    /// Субчанки с мешем — единственные, кому нужна позиция сущности.
+    pub live: Vec<SubchunkKey>,
+
+    /// `live` изменился с прошлого кадра (добавление или удаление ключа).
+    pub live_dirty: bool,
+
+    /// Якорь камеры на прошлом кадре. Позиции мешей пересчитываются только
+    /// когда он сдвинулся: иначе запись в `Transform` каждый кадр заставляла бы
+    /// Bevy пересчитывать `GlobalTransform` у всех сущностей впустую.
+    pub last_anchor_x: f64,
+    pub last_anchor_z: f64,
 }
 
 impl MeshStorage {
     pub fn new() -> Self {
         Self {
-            subchunks: HashMap::with_capacity(WINDOW_CHUNK_COUNT * SUBCHUNKS_PER_CHUNK),
-            entity_count: 0,
+            subchunks: HashMap::with_capacity(MAX_SUBCHUNKS),
+            pending_build: Vec::with_capacity(MAX_SUBCHUNKS),
+            pending_swap: Vec::with_capacity(MAX_SUBCHUNKS),
+            live: Vec::with_capacity(MAX_SUBCHUNKS),
+            live_dirty: false,
+            last_anchor_x: f64::NAN,
+            last_anchor_z: f64::NAN,
         }
     }
 
@@ -94,18 +134,30 @@ impl MeshStorage {
         self.subchunks.is_empty()
     }
 
-    pub fn ready_subchunks(&self) -> impl Iterator<Item = (&SubchunkKey, &SubchunkRenderData)> {
-        self.subchunks.iter().filter(|(_, d)| d.state == SubchunkRenderState::Ready)
+    /// Кладёт субчанк в `pending_build`. Дедуп даёт вызывающий: попасть сюда
+    /// можно только из `Empty` или из `Ready` (переход в `Dirty`).
+    #[inline]
+    pub fn push_build(&mut self, key: SubchunkKey) {
+        self.pending_build.push(key);
     }
 
-    pub fn dirty_subchunks(&self) -> impl Iterator<Item = (&SubchunkKey, &SubchunkRenderData)> {
-        self.subchunks.iter().filter(|(_, d)| d.state == SubchunkRenderState::Dirty)
+    /// Кладёт субчанк в `pending_swap`. Вызывается только при переходе
+    /// `Dirty → Rebuilding`, поэтому дублей не бывает.
+    #[inline]
+    pub fn push_swap(&mut self, key: SubchunkKey) {
+        self.pending_swap.push(key);
     }
 
-    pub fn pending_subchunks(&self) -> impl Iterator<Item = (&SubchunkKey, &SubchunkRenderData)> {
-        self.subchunks.iter().filter(|(_, d)| {
-            d.state == SubchunkRenderState::Building || d.state == SubchunkRenderState::Rebuilding
-        })
+    /// Помечает субчанк живым (есть меш, нужна позиция). Идемпотентно.
+    #[inline]
+    pub fn mark_live(&mut self, key: SubchunkKey) {
+        if let Some(data) = self.subchunks.get_mut(&key) {
+            if !data.in_live {
+                data.in_live = true;
+                self.live.push(key);
+                self.live_dirty = true;
+            }
+        }
     }
 }
 
