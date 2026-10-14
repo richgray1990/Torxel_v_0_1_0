@@ -14,12 +14,13 @@ name = "generate_world"
 path = "src/bin/generate_world.rs"
 
 [dependencies]
-bevy = "0.19.1"
+bevy = "0.20.0"
 bytemuck = "1"
 flume = "0.12.0"
 crossbeam = "0.8"
 rayon = "1.10"
-smallvec = "1.16.0"
+smallvec = "1.16.3"
+noise = "0.9"
 
 # Dev профиль: быстрая компиляция для итераций
 [profile.dev]
