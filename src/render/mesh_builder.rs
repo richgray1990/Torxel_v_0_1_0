@@ -11,6 +11,7 @@ use crate::voxel::materials::{get_material, ids, is_transparent};
 use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
+use crate::systems::perf::PERF_ENABLED;
 
 /// Теоретическая верхняя граница вершин в субчанке (все ячейки — отдельные кубы).
 /// Не используется для резервирования: реальный субчанк заполнен на доли процента,
@@ -133,7 +134,13 @@ impl Default for HaloBuf {
     }
 }
 
+/// Строит меш субчанка в переданный буфер.
+///
+/// `mesh_data` переиспользуется между вызовами (`clear()` вместо `new()`): при
+/// параллельном вызове каждый воркер держит свой буфер, поэтому аллокаций в
+/// установившемся режиме нет.
 pub fn build_subchunk_mesh(
+    mesh_data: &mut SubchunkMeshData,
     halo: &mut HaloBuf,
     subchunk_index: usize,
     pool: &ChunkPool,
@@ -142,14 +149,27 @@ pub fn build_subchunk_mesh(
     chunk_z: i64,
     slot: usize,
     window: &ReadWindowManager,
-) -> SubchunkMeshData {
-    let mut mesh_data = SubchunkMeshData::new();
+    // Под-метки для `PerfStats`: чтобы разложить пик, замер не должен требовать
+    // второго прохода по граням. `None` — замер выключен (см. `PERF_ENABLED`).
+    fill_ns: Option<&mut u64>,
+    face_ns: Option<&mut u64>,
+) {
+    mesh_data.clear();
 
     let sub_x = (subchunk_index % SUBCHUNKS_X) * SUBCHUNK_SIDE;
     let sub_y = ((subchunk_index / SUBCHUNKS_X) % SUBCHUNKS_Y) * SUBCHUNK_HEIGHT;
     let sub_z = (subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)) * SUBCHUNK_SIDE;
 
-    fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+    let fill_elapsed = if PERF_ENABLED {
+        let t = std::time::Instant::now();
+        fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        t.elapsed()
+    } else {
+        fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        std::time::Duration::ZERO
+    };
+
+    let t_face = if PERF_ENABLED { Some(std::time::Instant::now()) } else { None };
 
     let tops = window.height_map.column_slice(slot);
     let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
@@ -224,7 +244,12 @@ pub fn build_subchunk_mesh(
         }
     }
 
-    mesh_data
+    if let Some(slot) = fill_ns {
+        *slot += fill_elapsed.as_nanos() as u64;
+    }
+    if let (Some(slot), Some(t)) = (face_ns, t_face) {
+        *slot += t.elapsed().as_nanos() as u64;
+    }
 }
 
 /// Заполняет `halo` блоками субчанка и одноблочным кольцом соседей.

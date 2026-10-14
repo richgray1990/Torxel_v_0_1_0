@@ -33,9 +33,13 @@ pub enum Bucket {
     UpdateMeshEntities,
     ApplyCellEvents,
     Gc,
+    /// Под-метки `BuildMeshes` — только для разложения пика, не самостоятельные системы.
+    FillHalo,
+    FaceLoop,
+    MeshInsert,
 }
 
-pub const BUCKET_COUNT: usize = 14;
+pub const BUCKET_COUNT: usize = 17;
 
 const NAMES: [&str; BUCKET_COUNT] = [
     "Frame",
@@ -52,6 +56,9 @@ const NAMES: [&str; BUCKET_COUNT] = [
     "UpdateMeshEntities",
     "ApplyCellEvents",
     "Gc",
+    "FillHalo",
+    "FaceLoop",
+    "MeshInsert",
 ];
 
 impl Bucket {
