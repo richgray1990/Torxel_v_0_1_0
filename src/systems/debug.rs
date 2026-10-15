@@ -32,6 +32,7 @@ pub fn debug_report_system(
     mut timer: ResMut<DebugTimer>,
     stats: Res<PerfStats>,
     swap_copy_stats: Res<SwapCopyStats>,
+    mut report: Local<String>,
     // manager: Res<ChunkManager>,
     // read_world: Res<ReadWorld>,
     // write_world: Res<WriteWorld>,
@@ -46,6 +47,8 @@ pub fn debug_report_system(
     // dimensions: Option<Res<WorldDimensions>>,
     // transforms: Query<&Transform>,
 ) {
+    let t = std::time::Instant::now();
+
     // Полное время кадра — опорная точка для остальных бакетов.
     stats.record(Bucket::Frame, time.delta());
 
@@ -54,8 +57,25 @@ pub fn debug_report_system(
         return;
     }
 
-    stats.report_and_reset();
-    swap_copy_stats.report_and_reset();
+    // Собираем обе строки в один буфер и печатаем одним вызовом: 19 `print!`
+    // давали столько же заходов в stdout, а он в Rust буферизован построчно.
+    // Буфер переиспользуется между отчётами (`Local`), поэтому аллокаций нет.
+    report.clear();
+    stats.report_and_reset(&mut report);
+    swap_copy_stats.report_and_reset(&mut report);
+
+    if !report.is_empty() {
+        println!("{:?}", report);
+    }
+
+    // Замер самой этой системы — вместе с печатью, то есть вместе с IO в терминал.
+    // Пишется ПОСЛЕ `report_and_reset`, поэтому покажется в следующем отчёте (сдвиг
+    // на интервал). Иначе пришлось бы либо не мерить, либо обнулять счётчик дважды.
+    //
+    // Живёт вне `GameFlowWall` (та оборачивает только цепочку), поэтому в `Frame`
+    // попадает, а больше нигде не видно: без этого бакета цена печати выглядела бы
+    // как «пик кадра вне наших систем».
+    stats.record(Bucket::Report, t.elapsed());
 
     // println!("\n═══════════════ DEBUG REPORT ═══════════════");
 

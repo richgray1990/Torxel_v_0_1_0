@@ -8,8 +8,9 @@ use bevy::prelude::*;
 use crate::manager::{ChunkManager, ReadWindowManager, SlotState};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
 use crate::voxel::format::{
-    all_subchunks_mask, POOL_CHUNK_COUNT, SUBCHUNK_HEIGHT, SUBCHUNKS_Y,
+    all_subchunks_mask, POOL_CHUNK_COUNT, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE, SUBCHUNKS_Y,
 };
+use crate::voxel::height_map::column_index;
 use crate::systems::perf::{Bucket, PerfStats};
 
 pub fn dispatch_loaded_events_system(
@@ -77,30 +78,29 @@ pub fn dispatch_loaded_events_system(
         // Помечаем, что уведомление отправлено.
         manager.metadata[slot].render_notified = true;
 
-        // ВНИМАНИЕ: инвалидация соседей отключена (2026-10-14). Край активного
-        // окна теперь считается сплошным (`HALO_OPAQUE` в `fill_halo`), поэтому
-        // грани на границе окна не строятся вовсе — пересобирать соседей при
-        // появлении нового чанка нечего. Это снимает `ChunkDirty` соседям, то есть
-        // основную долю `MeshInsert` при диагональном пролёте.
-        //
-        // Обратная сторона: инвалидация была односторонней — сосед, загрузившийся
-        // РАНЬШЕ, пересобирался позже при появлении второго. Если край окна снова
-        // станет «воздухом», эту строку надо вернуть, иначе останется закрытая грань.
-        // invalidate_neighbors(&read_window, &mut mesh_queue, slot, grid_x, grid_z);
+        // Инвалидируем соседей, у которых на стыке с новым чанком образуется обрыв.
+        // Сосед, загрузившийся раньше, мешился с отсутствующим слотом нового чанка —
+        // край считался сплошным, и его грань в сторону нового чанка была отсечена.
+        // Если рельеф нового чанка ниже, эта грань обязана быть видна: обрыв есть,
+        // геометрии нет. Метод — сравнение карт высот на стыке (вариант C, 2026-10-15).
+        invalidate_neighbors(&read_window, &mut mesh_queue, slot, grid_x, grid_z);
     }
 
     stats.record(Bucket::DispatchLoaded, t.elapsed());
 }
 
-/// Помечает грязными приграничные субчанки четырёх соседей по X/Z.
+/// Помечает грязными те субчанки четырёх соседей по X/Z, на которых к стыку с
+/// только что загруженным чанком образуется **обрыв**.
+///
+/// Зачем это нужно: сосед, загрузившийся раньше, мешился, когда слота нового чанка
+/// ещё не существовало. `fill_halo` в этой ситуации считает край сплошным
+/// (`HALO_OPAQUE`), поэтому грань соседа в сторону нового чанка отсекается. Если
+/// рельеф нового чанка ниже, эта грань обязана быть видна — обрыв есть, геометрии
+/// нет. Отсюда дыра, замеченная 2026-10-14.
 ///
 /// Все данные берутся только с read-стороны (`read_window`), которая опубликована
 /// вместе с текущим `ReadWorld`. `ChunkManager` (write-сторона) может опережать
 /// снапшот, если свап отложен, — по нему ни координаты, ни границы брать нельзя.
-///
-/// Временно не вызывается: край активного окна считается сплошным, пересобирать
-/// соседей при появлении чанка нечего. См. комментарий на месте вызова.
-#[allow(dead_code)]
 fn invalidate_neighbors(
     read_window: &ReadWindowManager,
     mesh_queue: &mut MeshUpdateQueue,
@@ -113,11 +113,6 @@ fn invalidate_neighbors(
     if read_window.slot_for_chunk(nx, nz) != Some(slot) {
         return;
     }
-
-    let mask = match content_subchunk_mask(read_window, slot) {
-        Some(m) => m,
-        None => return,
-    };
 
     for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
         // `grid_x`/`grid_z` — индексы чанков, а не блоков: сосед отличается на 1.
@@ -135,6 +130,11 @@ fn invalidate_neighbors(
             continue;
         }
 
+        let mask = cliff_subchunk_mask(read_window, n_slot, slot, dx, dz);
+        if mask == 0 {
+            continue;
+        }
+
         mesh_queue.push(MeshUpdateEvent {
             kind: MeshUpdateKind::ChunkDirty,
             source: RenderSource::Active,
@@ -146,25 +146,60 @@ fn invalidate_neighbors(
     }
 }
 
-/// Маска субчанков, перекрывающих содержимое чанка. `None` — чанк пуст,
-/// инвалидировать нечего.
-fn content_subchunk_mask(read_window: &ReadWindowManager, slot: usize) -> Option<u64> {
-    match read_window.content_y_range(slot) {
-        // Границы недостоверны (чанк правили) — берём все субчанки.
-        None => Some(all_subchunks_mask()),
-        // Пустой чанк: диапазон вывернут, содержимого нет.
-        Some((min_y, max_y)) if min_y > max_y => None,
-        Some((min_y, max_y)) => {
-            let sy_lo = (min_y as usize / SUBCHUNK_HEIGHT).min(SUBCHUNKS_Y - 1);
-            let sy_hi = (max_y as usize / SUBCHUNK_HEIGHT).min(SUBCHUNKS_Y - 1);
+/// Маска субчанков соседа `n_slot`, которыми он выше нового чанка `slot` вдоль их
+/// общей грани. `0` — обрыва нет, пересобирать нечего.
+///
+/// Сравниваются карты высот обеих сторон по каждой из 16 колонок стыка: где сосед
+/// выше нового чанка на этой колонке, там он смотрит в воздух и его грань должна
+/// быть построена. Полоса такого обрыва — `[top_нового, top_соседа)`, её и
+/// покрывают биты. Оценка даёт 0–2 субчанка на соседа (обычный случай — 1), тогда
+/// как маска от полосы содержимого чанка давала бы 6–8.
+///
+/// Важно: маска считается от **соседа**, а не от нового чанка. Прежняя версия брала
+/// полосу нового чанка и потому лечила стены (лишние грани), а не обрывы (пропавшие).
+fn cliff_subchunk_mask(
+    read_window: &ReadWindowManager,
+    n_slot: usize,
+    slot: usize,
+    dx: i64,
+    dz: i64,
+) -> u64 {
+    let map = &read_window.height_map;
+    let mut mask = 0u64;
 
-            // Диапазон зажался в границы чанка и вывернулся — содержимого нет.
-            if sy_lo > sy_hi {
-                return None;
-            }
+    for i in 0..SUBCHUNK_SIDE {
+        // Локальные колонки обеих сторон вдоль общей грани. `column_index` —
+        // `local_z * CHUNK_SIDE + local_x`.
+        let (n_col, s_col) = match (dx, dz) {
+            // Сосед западнее: его восточная кромка (x = 15) против западной нового (x = 0).
+            (-1, 0) => (column_index(SUBCHUNK_SIDE - 1, i), column_index(0, i)),
+            // Сосед восточнее: его западная кромка против восточной нового.
+            (1, 0) => (column_index(0, i), column_index(SUBCHUNK_SIDE - 1, i)),
+            // Сосед южнее: кромки по `z`.
+            (0, -1) => (column_index(i, SUBCHUNK_SIDE - 1), column_index(i, 0)),
+            // Сосед севернее.
+            (0, 1) => (column_index(i, 0), column_index(i, SUBCHUNK_SIDE - 1)),
+            _ => continue,
+        };
 
-            let bits = sy_hi - sy_lo + 1;
-            Some(((1u64 << bits) - 1) << sy_lo)
+        let n_top = map.top_y(n_slot, n_col) as usize;
+        let s_top = map.top_y(slot, s_col) as usize;
+
+        // Сосед не выше нового чанка на этой колонке — обрыва нет.
+        if s_top >= n_top {
+            continue;
         }
+
+        // `top_y` — первая воздушная ячейка, поэтому обрыв это `[s_top, n_top)`.
+        let sy_lo = (s_top / SUBCHUNK_HEIGHT).min(SUBCHUNKS_Y - 1);
+        let sy_hi = ((n_top - 1) / SUBCHUNK_HEIGHT).min(SUBCHUNKS_Y - 1);
+
+        if sy_lo > sy_hi {
+            continue;
+        }
+
+        mask |= ((1u64 << (sy_hi - sy_lo + 1)) - 1) << sy_lo;
     }
+
+    mask
 }

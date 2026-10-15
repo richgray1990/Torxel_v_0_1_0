@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use crate::systems::perf::{Bucket, PerfStats};
+
 const PITCH_SPEED: f32 = 45.0;
 const MOVE_SPEED: f32 = 128.0;
 const ZOOM_LEVELS: [f32; 3] = [1.0, 2.0, 4.0];
@@ -128,7 +130,9 @@ pub fn camera_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut controller: ResMut<CameraController>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let dt = time.delta_secs();
 
     if keys.pressed(KeyCode::KeyX) {
@@ -179,12 +183,16 @@ pub fn camera_input_system(
         controller.anchor_x += rotated_x * speed;
         controller.anchor_z += rotated_z * speed;
     }
+
+    stats.record(Bucket::CameraInput, t.elapsed());
 }
 
 pub fn camera_transform_system(
     controller: Res<CameraController>,
     mut camera_query: Query<(&mut Transform, &mut GlobalTransform), With<Camera3d>>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let look_dir = controller.look_direction();
     let distance = controller.camera_height / controller.pitch.sin().max(0.001);
 
@@ -216,4 +224,6 @@ pub fn camera_transform_system(
         //     ortho.scale = BASE_ORTHO_SCALE / controller.zoom();
         // }
     }
+
+    stats.record(Bucket::CameraTransform, t.elapsed());
 }

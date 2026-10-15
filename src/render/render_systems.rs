@@ -10,7 +10,7 @@ use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, 
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
     CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
-    SUBCHUNK_HEIGHT, SUBCHUNK_SIDE, WorldDimensions,
+    SUBCHUNK_HEIGHT, WorldDimensions,
 };
 use crate::voxel::pool::ReadWorld;
 use crate::systems::perf::{Bucket, PerfStats, PERF_ENABLED};
@@ -429,14 +429,21 @@ pub fn update_mesh_entities_system(
     let mut w = 0usize;
     let count = mesh_storage.live.len();
 
+    // Кэш позиции на чанк. Все субчанки чанка делят одну позицию: смещения
+    // субчанка по X/Z равны нулю (см. ниже), высота нулевая. `live` приходит
+    // сгруппированным по чанкам, поэтому `normalize_dx/dz` (два `rem_euclid` на
+    // f64, то есть деления) считаются один раз на чанк, а не на каждый ключ.
+    let mut cached_chunk_x = i64::MIN;
+    let mut cached_chunk_z = i64::MIN;
+    let mut cached_position = Vec3::ZERO;
+
     while r < count {
         let key = mesh_storage.live[r];
         r += 1;
 
-        // Фаза 1: короткое заимствование — забираем всё нужное и отпускаем.
-        // Держать `data` до конца итерации нельзя: ниже понадобится второе
-        // заимствование `mesh_storage` целиком.
-        let (mesh_handle, had_entity) = {
+        // Фаза 1: одно заимствование — забираем всё нужное и отпускаем.
+        // Оба значения Copy, поэтому дальше `mesh_storage` свободен.
+        let (mesh_handle, entity) = {
             let data = match mesh_storage.get_mut(&key) {
                 Some(d) => d,
                 // Чанк выгружен — ключ мёртв, в список не возвращаем.
@@ -455,75 +462,73 @@ pub fn update_mesh_entities_system(
                 }
             };
 
-            (mesh_handle, data.entity.is_some())
+            (mesh_handle, data.entity)
         };
 
-        let sub_x_offset = (key.subchunk_index % SUBCHUNKS_X) as f32 * SUBCHUNK_SIDE as f32;
-        let sub_z_offset = (key.subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)) as f32 * SUBCHUNK_SIDE as f32;
+        // Позиция субчанка. Смещения по X/Z не считаем: при `SUBCHUNKS_X = 1`
+        // выражение `subchunk_index % SUBCHUNKS_X` тождественно нулю, а
+        // `subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)` равно нулю для любого
+        // индекса < 32. Мир по вертикали живёт в нуле (`world_y = 0.0`).
+        let position = if key.chunk_x == cached_chunk_x && key.chunk_z == cached_chunk_z {
+            cached_position
+        } else {
+            let world_x = key.chunk_x as f64 * CHUNK_SIDE as f64;
+            let world_z = key.chunk_z as f64 * CHUNK_SIDE as f64;
 
-        let world_x = key.chunk_x as f64 * CHUNK_SIDE as f64 + sub_x_offset as f64;
-        let world_y = 0.0;
-        let world_z = key.chunk_z as f64 * CHUNK_SIDE as f64 + sub_z_offset as f64;
+            let offset_x = dimensions.normalize_dx(controller.anchor_x, world_x);
+            let offset_z = dimensions.normalize_dz(controller.anchor_z, world_z);
 
-        let offset_x = dimensions.normalize_dx(controller.anchor_x, world_x);
-        let offset_z = dimensions.normalize_dz(controller.anchor_z, world_z);
-
-        let position = Vec3::new(offset_x as f32, world_y as f32, offset_z as f32);
+            cached_chunk_x = key.chunk_x;
+            cached_chunk_z = key.chunk_z;
+            cached_position = Vec3::new(offset_x as f32, 0.0, offset_z as f32);
+            cached_position
+        };
 
         // Фаза 2: позиционирование. Якорь не двигался — запись в `Transform` была бы
         // холостой, но всё равно пометила бы компонент изменённым и заставила Bevy
         // пересчитать `GlobalTransform`. Существующие меши трогаем только при сдвиге
         // камеры, свежую сущность ставим сразу.
-        if had_entity {
-            let existing = match mesh_storage.get(&key) {
-                Some(d) => d.entity,
-                None => continue,
-            };
-
-            if anchor_moved {
-                if let Some(entity) = existing {
+        //
+        // Переживание ключа решается здесь же, без третьего обращения в хранилище:
+        // `current_mesh` уже известен (мы только что взяли из него `mesh_handle`),
+        // `entity` отслеживается локально.
+        match entity {
+            Some(entity) => {
+                if anchor_moved {
                     match transforms.get_mut(entity) {
                         Ok(mut transform) => transform.translation = position,
                         Err(_) => {
                             // Сущность удалена извне (деспавн меша). Ссылку надо
                             // сбросить, иначе позиция такого меша не обновится уже
-                            // никогда: ветка ниже её не пересоздаст.
+                            // никогда: ветка ниже её не пересоздаст. Ключ уходит из
+                            // живых, и меш будет пересоздан.
                             if let Some(d) = mesh_storage.get_mut(&key) {
                                 d.entity = None;
+                                d.in_live = false;
                             }
+                            continue;
                         }
                     }
                 }
             }
-        } else {
-            let entity = commands
-                .spawn((
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(voxel_material.0.clone()),
-                    Transform::from_translation(position),
-                    Visibility::default(),
-                ))
-                .id();
+            None => {
+                let entity = commands
+                    .spawn((
+                        Mesh3d(mesh_handle),
+                        MeshMaterial3d(voxel_material.0.clone()),
+                        Transform::from_translation(position),
+                        Visibility::default(),
+                    ))
+                    .id();
 
-            if let Some(d) = mesh_storage.get_mut(&key) {
-                d.entity = Some(entity);
+                if let Some(d) = mesh_storage.get_mut(&key) {
+                    d.entity = Some(entity);
+                }
             }
         }
 
-        // Ключ переживает кадр только если субчанк всё ещё в хранилище с мешем
-        // и ссылкой на сущность. Это же отсеивает случай, когда сущность
-        // сброшена веткой выше — ключ уходит из живых, и меш пересоздаётся.
-        let alive = match mesh_storage.get(&key) {
-            Some(d) => d.entity.is_some() && d.current_mesh.is_some(),
-            None => false,
-        };
-
-        if alive {
-            mesh_storage.live[w] = key;
-            w += 1;
-        } else if let Some(d) = mesh_storage.get_mut(&key) {
-            d.in_live = false;
-        }
+        mesh_storage.live[w] = key;
+        w += 1;
     }
 
     mesh_storage.live.truncate(w);

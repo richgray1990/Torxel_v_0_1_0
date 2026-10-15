@@ -15,6 +15,7 @@ use bytemuck::Zeroable;
 use crate::manager::ReadWindowManager;
 use crate::queues::cell_events::{CellEvent, CellEventQueue};
 use crate::render::camera::CameraController;
+use crate::systems::perf::{Bucket, PerfStats};
 use crate::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, WorldDimensions};
 use crate::voxel::materials::{ids};//-, phases
 use crate::voxel::pool::ReadWorld;
@@ -86,7 +87,9 @@ pub fn block_interaction_system(
     mut events: ResMut<CellEventQueue>,
     mut commands: Commands,
     mut highlight: ResMut<HighlightState>,
+    stats: Res<PerfStats>,
 ) {
+    let t = std::time::Instant::now();
     let toggle_pressed = keys.just_pressed(KeyCode::KeyI);
     let remove_pressed = keys.just_pressed(KeyCode::KeyT);
     let place_pressed = keys.just_pressed(KeyCode::KeyR);
@@ -107,22 +110,27 @@ pub fn block_interaction_system(
     let needs_ray = highlight.enabled || remove_pressed || place_pressed;
 
     if !needs_ray {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     }
 
     let Ok(window) = windows.single() else {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     };
 
     let Some(cursor_pos) = window.cursor_position() else {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     };
 
     let Ok((camera, camera_transform)) = cameras.single() else {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     };
 
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     };
 
@@ -164,6 +172,7 @@ pub fn block_interaction_system(
 
     // Для R/T нужен успешный hit.
     let Some(hit) = hit else {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
         return;
     };
 
@@ -189,6 +198,7 @@ pub fn block_interaction_system(
 
         // Вертикальных чанков пока нет, выше потолка ставить некуда.
         if place_ly >= CHUNK_HEIGHT {
+            stats.record(Bucket::BlockInteraction, t.elapsed());
             return;
         }
 
@@ -196,6 +206,7 @@ pub fn block_interaction_system(
 
         // Ставим только в воздух.
         if read_world.0.get(hit.slot, place_cell_index).material_id != ids::AIR {
+            stats.record(Bucket::BlockInteraction, t.elapsed());
             return;
         }
 
@@ -210,6 +221,8 @@ pub fn block_interaction_system(
             generation,
         ));
     }
+
+    stats.record(Bucket::BlockInteraction, t.elapsed());
 }
 
 fn show_highlight(

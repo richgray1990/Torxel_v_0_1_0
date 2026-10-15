@@ -41,9 +41,19 @@ pub enum Bucket {
     /// Диагностика: сравнить с `Frame`, чтобы понять, лежит ли пик кадра
     /// внутри наших систем или вне их (winit/vsync/render extract/present).
     GameFlowWall,
+    /// Время самого `debug_report_system`, включая печать. Живёт **вне**
+    /// `GameFlowWall` (та оборачивает только цепочку), поэтому попадает в `Frame`,
+    /// но нигде больше не видно. Печатается со сдвигом на интервал: счётчик
+    /// пишется после `report_and_reset`, то есть показывается в следующем отчёте.
+    Report,
+    /// Системы, которые до 2026-10-15 не мерились вовсе.
+    RequestSwap,
+    CameraInput,
+    CameraTransform,
+    BlockInteraction,
 }
 
-pub const BUCKET_COUNT: usize = 18;
+pub const BUCKET_COUNT: usize = 23;
 
 const NAMES: [&str; BUCKET_COUNT] = [
     "Frame",
@@ -64,6 +74,11 @@ const NAMES: [&str; BUCKET_COUNT] = [
     "FaceLoop",
     "MeshInsert",
     "GameFlowWall",
+    "Report",
+    "RequestSwap",
+    "CameraInput",
+    "CameraTransform",
+    "BlockInteraction",
 ];
 
 impl Bucket {
@@ -134,10 +149,14 @@ impl PerfStats {
         self.buckets[bucket.index()].record(elapsed.as_nanos() as u64);
     }
 
-    /// Печатает накопленное за интервал и обнуляет счётчики.
+    /// Пишет накопленное за интервал в `out` и обнуляет счётчики.
     ///
-    /// Печатает только бакеты с ненулевым счётчиком — в покое строка короткая.
-    pub fn report_and_reset(&self) {
+    /// Ничего не печатает сам: 19 отдельных `print!` — это 19 заходов в stdout,
+    /// а stdout в Rust буферизован построчно и сбрасывается на каждом переводе
+    /// строки. Вызывающий собирает всё в один буфер и печатает одним вызовом.
+    ///
+    /// Пишет только бакеты с ненулевым счётчиком — в покое строка короткая.
+    pub fn report_and_reset(&self, out: &mut String) {
         if !PERF_ENABLED {
             return;
         }
@@ -145,7 +164,8 @@ impl PerfStats {
         let (_, frame_max, frame_count) = self.buckets[Bucket::Frame.index()].take();
         let frame_max_ms = frame_max as f64 / 1e6;
 
-        print!("[PERF] frame n={} max={:.2}ms", frame_count, frame_max_ms);
+        use std::fmt::Write as _;
+        let _ = write!(out, "[PERF] frame n={} max={:.2}ms", frame_count, frame_max_ms);
 
         for i in 0..BUCKET_COUNT {
             if i == Bucket::Frame.index() {
@@ -158,7 +178,8 @@ impl PerfStats {
                 continue;
             }
 
-            print!(
+            let _ = write!(
+                out,
                 " | {} n={} sum={:.2}ms max={:.2}ms",
                 NAMES[i],
                 count,
@@ -167,7 +188,7 @@ impl PerfStats {
             );
         }
 
-        println!();
+        out.push('\n');
     }
 }
 
@@ -199,9 +220,9 @@ impl SwapCopyStats {
         self.count.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Печатает накопленное за интервал и обнуляет счётчики. Молчит, если за
+    /// Пишет накопленное за интервал в `out` и обнуляет счётчики. Молчит, если за
     /// интервал не было ни одного свапа с грязными чанками.
-    pub fn report_and_reset(&self) {
+    pub fn report_and_reset(&self, out: &mut String) {
         if !PERF_ENABLED {
             return;
         }
@@ -214,7 +235,9 @@ impl SwapCopyStats {
             return;
         }
 
-        println!(
+        use std::fmt::Write as _;
+        let _ = writeln!(
+            out,
             "[PERF-COPY] n={} sum={:.2}MB max={:.2}MB",
             count,
             sum as f64 / (1024.0 * 1024.0),
