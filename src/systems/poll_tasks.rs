@@ -6,7 +6,7 @@ use crate::io::staging::ActiveStagingBuffer;
 use crate::voxel::pool::WriteWorld;
 use crate::voxel::height_map::WriteHeightMap;
 use crate::manager::{ChunkManager, SlotState};
-use crate::systems::perf::{Bucket, PerfStats};
+use crate::systems::perf::{Bucket, PerfStats, FrameFlowStart};
 
 /// Система опроса фоновых задач активного пула.
 pub fn poll_background_tasks_system(
@@ -16,7 +16,12 @@ pub fn poll_background_tasks_system(
     mut write_height_map: ResMut<WriteHeightMap>,
     mut manager: ResMut<ChunkManager>,
     stats: Res<PerfStats>,
+    mut flow_start: ResMut<FrameFlowStart>,
 ) {
+    // Первая система цепочки `GameFlowSet` — отмечаем начало для `GameFlowWall`
+    // (диагностика: сравнить с `Frame`, чтобы понять, наш ли пик кадра).
+    flow_start.0 = Some(std::time::Instant::now());
+
     let t = std::time::Instant::now();
     // Забираем ответы на загрузку из канала.
     while let Some(response) = io_manager.try_recv_load_response() {

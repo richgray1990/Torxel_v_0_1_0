@@ -100,7 +100,8 @@ pub struct WorldHeader {
     pub spawn_x: i32,
     pub spawn_z: i32,
     pub chunk_header_size: u32,
-    pub _padding: [u8; 32],
+    pub world_seed: u32,
+    pub _padding: [u8; 28],
 }
 
 unsafe impl Pod for WorldHeader {}
@@ -122,7 +123,8 @@ impl WorldHeader {
             spawn_x: 0,
             spawn_z: 0,
             chunk_header_size: std::mem::size_of::<ChunkHeader>() as u32,
-            _padding: [0; 32],
+            world_seed: 0,
+            _padding: [0; 28],
         }
     }
 
@@ -140,5 +142,9 @@ impl WorldHeader {
     pub fn chunk_total_size(&self) -> u64 {
         self.chunk_header_size as u64
             + (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u64
+    }
+
+    pub fn with_world_seed(&mut self, seed: u32) {
+        self.world_seed = seed;
     }
 }

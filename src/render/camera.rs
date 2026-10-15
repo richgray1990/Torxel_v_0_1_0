@@ -37,7 +37,7 @@ impl CameraController {
             anchor_z: 0.0,
             view_half_width: 16.0 / initial_zoom,
             view_half_height: 16.0 / initial_zoom,
-            camera_height: 128.0,
+            camera_height: 512.0,
         }
     }
 

@@ -214,7 +214,7 @@ pub fn build_subchunk_mesh(
                     let visible = is_face_visible(halo, nbx, nby, nbz);
 
                     if visible {
-                        let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.5;
+                        let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.15;
                         let r = material.color[0] as f32 / 255.0 * brightness;
                         let g = material.color[1] as f32 / 255.0 * brightness;
                         let b = material.color[2] as f32 / 255.0 * brightness;
@@ -304,7 +304,16 @@ fn fill_halo(
                 } else {
                     match neighbor_slot {
                         Some(s) => pool.get(s, column_base + y_signed as usize).material_id,
-                        None => ids::AIR,
+                        // Слота соседа нет — это край активного окна. Считаем его
+                        // сплошным (`HALO_OPAQUE`), чтобы на границе окна не строились
+                        // стены: за краем всё равно ничего не видно, а пересборка при
+                        // изменении состава соседей (инвалидация) больше не нужна.
+                        //
+                        // Раньше здесь был `ids::AIR` (семантика прежней
+                        // `is_face_visible`: «соседа нет → грань видна»), и граница
+                        // окна рисовалась стеной. Возврат к AIR вернёт стены и
+                        // потребует снова включить `invalidate_neighbors`.
+                        None => HALO_OPAQUE,
                     }
                 };
 

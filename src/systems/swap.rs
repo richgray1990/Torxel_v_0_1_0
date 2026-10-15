@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::format::{Cell, CELLS_PER_CHUNK, POOL_CHUNK_COUNT};
 use crate::voxel::height_map::{ReadHeightMap, WriteHeightMap};
 use crate::voxel::pool::{ReadWorld, WriteWorld};
 use crate::manager::masks::DirtyMask;
@@ -10,7 +10,7 @@ use crate::manager::{ChunkManager, ReadWindowManager};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, RenderSource};
 use crate::queues::PostSwapDirtyBuffer;
 use crate::signals::{ComputePhase, ComputePipeline, SwapSignal};
-use crate::systems::perf::{Bucket, PerfStats};
+use crate::systems::perf::{Bucket, PerfStats, SwapCopyStats};
 
 /// Фаза 1: Мгновенный обмен указателей пулов.
 ///
@@ -76,6 +76,7 @@ pub fn post_swap_copy_system(
     mut dirty_buffer: ResMut<PostSwapDirtyBuffer>,
     mut pipeline: ResMut<ComputePipeline>,
     stats: Res<PerfStats>,
+    swap_copy_stats: Res<SwapCopyStats>,
 ) {
     let t = std::time::Instant::now();
 
@@ -100,9 +101,12 @@ pub fn post_swap_copy_system(
     }
 
     // Копируем грязные чанки и складываем события в буфер
+    let mut copied_chunks: u64 = 0;
+
     for i in dirty_mask.iter_set() {
         write_world.0.copy_chunk_from(&read_world.0, i);
         write_height_map.0.copy_slot_from(&read_height_map.0, i);
+        copied_chunks += 1;
 
         // Забираем маску грязных субчанков и сбрасываем
         let sub_mask = manager.metadata[i].take_dirty_subchunks();
@@ -117,6 +121,14 @@ pub fn post_swap_copy_system(
         });
 
         manager.set_pending_b_dirty(i, false);
+    }
+
+    // Диагностика N7: точный байтовый вес копии за этот свап, вместо оценки
+    // «на глаз». Высотная карта (540 Б/чанк) на фоне 2 МиБ/чанк пренебрежима,
+    // в счёт не берём.
+    if copied_chunks > 0 {
+        const CHUNK_BYTES: u64 = (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u64;
+        swap_copy_stats.record_bytes(copied_chunks * CHUNK_BYTES);
     }
 
     // Готово — обсчёт может работать

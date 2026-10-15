@@ -16,7 +16,7 @@ use crate::voxel::pool::ReadWorld;
 use crate::systems::perf::{Bucket, PerfStats, PERF_ENABLED};
 // Точные трейты вместо `rayon::prelude::*`: в файле уже есть `bevy::prelude::*`,
 // и второй глобальный прелюд рискует конфликтом имён.
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};  //-IntoParallelIterator
 
 /// Общий материал для всех субчанков.
 ///
@@ -387,7 +387,7 @@ pub fn swap_meshes_system(
         }
         data.current_mesh = Some(new_mesh);
         data.state = SubchunkRenderState::Ready;
-        drop(data);
+        let _ = data;
 
         mesh_storage.mark_live(key);
     }

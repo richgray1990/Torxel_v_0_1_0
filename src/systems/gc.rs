@@ -6,7 +6,7 @@ use crate::voxel::pool::ReadWorld;
 use crate::io::channels::SaveRequest;
 use crate::manager::{ChunkManager, ReadWindowManager, SlotState, LOAD_TIMEOUT_FRAMES};
 use crate::queues::mesh_queue::{MeshUpdateEvent, MeshUpdateKind, MeshUpdateQueue, RenderSource};
-use crate::systems::perf::{Bucket, PerfStats};
+use crate::systems::perf::{Bucket, PerfStats, FrameFlowStart};
 
 /// Система сборки мусора.
 pub fn chunk_garbage_collector_system(
@@ -15,6 +15,7 @@ pub fn chunk_garbage_collector_system(
     read_window: Res<ReadWindowManager>,
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     stats: Res<PerfStats>,
+    mut flow_start: ResMut<FrameFlowStart>,
 ) {
     let t = std::time::Instant::now();
     for slot in 0..POOL_CHUNK_COUNT {
@@ -125,4 +126,9 @@ pub fn chunk_garbage_collector_system(
     }
 
     stats.record(Bucket::Gc, t.elapsed());
+
+    // Последняя система цепочки `GameFlowSet` — закрываем `GameFlowWall`.
+    if let Some(start) = flow_start.0.take() {
+        stats.record(Bucket::GameFlowWall, start.elapsed());
+    }
 }

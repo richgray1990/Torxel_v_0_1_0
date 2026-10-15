@@ -29,4 +29,4 @@ pub use request_swap::request_swap_system;
 
 pub use debug::{debug_report_system, DebugTimer};
 pub use block_interaction::{block_interaction_system, init_highlight_system, HighlightState,};
-pub use perf::{Bucket, PerfStats};
+pub use perf::{Bucket, PerfStats, FrameFlowStart, SwapCopyStats};

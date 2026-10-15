@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-use crate::systems::perf::{Bucket, PerfStats};
+use crate::systems::perf::{Bucket, PerfStats, SwapCopyStats};
 
 // use crate::manager::{ChunkManager, SlotState};
 // use crate::queues::mesh_queue::MeshUpdateQueue;
@@ -31,6 +31,7 @@ pub fn debug_report_system(
     time: Res<Time>,
     mut timer: ResMut<DebugTimer>,
     stats: Res<PerfStats>,
+    swap_copy_stats: Res<SwapCopyStats>,
     // manager: Res<ChunkManager>,
     // read_world: Res<ReadWorld>,
     // write_world: Res<WriteWorld>,
@@ -54,6 +55,7 @@ pub fn debug_report_system(
     }
 
     stats.report_and_reset();
+    swap_copy_stats.report_and_reset();
 
     // println!("\n═══════════════ DEBUG REPORT ═══════════════");
 

@@ -37,9 +37,13 @@ pub enum Bucket {
     FillHalo,
     FaceLoop,
     MeshInsert,
+    /// Wall-time всей цепочки `PollPhase → GCPhase` (не отдельная система).
+    /// Диагностика: сравнить с `Frame`, чтобы понять, лежит ли пик кадра
+    /// внутри наших систем или вне их (winit/vsync/render extract/present).
+    GameFlowWall,
 }
 
-pub const BUCKET_COUNT: usize = 17;
+pub const BUCKET_COUNT: usize = 18;
 
 const NAMES: [&str; BUCKET_COUNT] = [
     "Frame",
@@ -59,6 +63,7 @@ const NAMES: [&str; BUCKET_COUNT] = [
     "FillHalo",
     "FaceLoop",
     "MeshInsert",
+    "GameFlowWall",
 ];
 
 impl Bucket {
@@ -163,5 +168,57 @@ impl PerfStats {
         }
 
         println!();
+    }
+}
+
+/// Момент начала цепочки `GameFlowSet` текущего кадра. Пишется первой системой
+/// цепочки (`poll_background_tasks_system`), читается последней (`chunk_garbage_collector_system`).
+/// `Option` вместо дефолтного `Instant` — на первом кадре читать нечего.
+#[derive(Resource, Default)]
+pub struct FrameFlowStart(pub Option<std::time::Instant>);
+
+/// Байтовый объём копии `post_swap_copy_system` за один вызов. Отдельный ресурс,
+/// а не `Bucket`: `PerfStats` хранит наносекунды, байты — другая единица, подсовывать
+/// их в тот же `AtomicU64` значило бы врать в выводе.
+#[derive(Resource, Default)]
+pub struct SwapCopyStats {
+    sum_bytes: AtomicU64,
+    max_bytes: AtomicU64,
+    count: AtomicU64,
+}
+
+impl SwapCopyStats {
+    #[inline(always)]
+    pub fn record_bytes(&self, bytes: u64) {
+        if !PERF_ENABLED {
+            return;
+        }
+
+        self.sum_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.max_bytes.fetch_max(bytes, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Печатает накопленное за интервал и обнуляет счётчики. Молчит, если за
+    /// интервал не было ни одного свапа с грязными чанками.
+    pub fn report_and_reset(&self) {
+        if !PERF_ENABLED {
+            return;
+        }
+
+        let sum = self.sum_bytes.swap(0, Ordering::Relaxed);
+        let max = self.max_bytes.swap(0, Ordering::Relaxed);
+        let count = self.count.swap(0, Ordering::Relaxed);
+
+        if count == 0 {
+            return;
+        }
+
+        println!(
+            "[PERF-COPY] n={} sum={:.2}MB max={:.2}MB",
+            count,
+            sum as f64 / (1024.0 * 1024.0),
+            max as f64 / (1024.0 * 1024.0)
+        );
     }
 }
