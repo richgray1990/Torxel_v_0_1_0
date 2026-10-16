@@ -127,8 +127,12 @@ pub fn chunk_garbage_collector_system(
 
     stats.record(Bucket::Gc, t.elapsed());
 
-    // Последняя система цепочки `GameFlowSet` — закрываем `GameFlowWall`.
-    if let Some(start) = flow_start.0.take() {
+    // Последняя система цепочки `GameFlowSet` — закрываем `GameFlowWall` и
+    // запоминаем момент конца: первую половину `FrameTail` отдаст следующая
+    // система цепочки на следующем кадре.
+    flow_start.end = Some(std::time::Instant::now());
+
+    if let Some(start) = flow_start.start.take() {
         stats.record(Bucket::GameFlowWall, start.elapsed());
     }
 }

@@ -34,7 +34,7 @@ pub use super::materials::ids::WATER as MATERIAL_WATER;
 // ═══════════════════════════════════════════════════════════
 
 pub const SUBCHUNK_SIDE: usize = 16;
-pub const SUBCHUNK_HEIGHT: usize = 16;
+pub const SUBCHUNK_HEIGHT: usize = 64;
 pub const SUBCHUNKS_X: usize = CHUNK_SIDE / SUBCHUNK_SIDE;
 pub const SUBCHUNKS_Y: usize = CHUNK_HEIGHT / SUBCHUNK_HEIGHT;
 pub const SUBCHUNKS_Z: usize = CHUNK_SIDE / SUBCHUNK_SIDE;

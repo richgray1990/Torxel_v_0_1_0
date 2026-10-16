@@ -247,16 +247,33 @@ impl Plugin for TorxelPlugin {
         );
 
         // UpdatePhase (параллельно)
-       // UpdatePhase: ввод камеры -> обновление окна -> трансформ камеры.
+        //
+        // `camera_input_system` вынесен ИЗ этой цепочки — см. регистрацию ниже.
+        // `update_window_system` и `camera_transform_system` друг с другом НЕ
+        // конфликтуют и намеренно не связаны `chain()`:
+        //   update_window   — пишет `ChunkManager`/`MeshUpdateQueue`/`SwapSignal`,
+        //                     читает `CameraController`;
+        //   camera_transform — пишет `Transform`/`GlobalTransform` КАМЕРЫ,
+        //                     читает `CameraController`.
+        // Общий у них только `Res<CameraController>` (оба читают), а мутации —
+        // в непересекающихся ресурсах, поэтому планировщик пустит их параллельно.
+        // Порядок между ними не наблюдаем: разные данные.
         app.add_systems(
             Update,
-            (
-                camera_input_system,
-                update_window_system,
-                camera_transform_system,
-            )
-                .chain()
+            (update_window_system, camera_transform_system)
                 .in_set(UpdatePhaseSet::UpdateWindow),
+        );
+
+        // Ввод камеры — отдельная ветка того же сета, БЕЗ `chain()` с двумя выше.
+        // Конфликта нет: эта система пишет `ResMut<CameraController>`, а обе
+        // соседние читают его через `Res` — то есть она лишь обязана идти раньше
+        // их, и планировщик выведет это из конфликта ресурсов сам. Отдельный
+        // `chain()` здесь был бы лишней сериализацией относительно `PollPhase`:
+        // `poll_background_tasks_system` держит `ChunkManager`/`WriteWorld`, а ввод
+        // камеры их не касается.
+        app.add_systems(
+            Update,
+            camera_input_system.in_set(UpdatePhaseSet::UpdateWindow),
         );
         
         // SwapPointers

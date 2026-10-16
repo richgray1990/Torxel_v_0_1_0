@@ -1,3 +1,6 @@
+use bevy::diagnostic::{
+    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin,
+};
 use bevy::prelude::*;
 use bevy::window::PresentMode;
 use torxel::voxel::topology::TorusTopology;
@@ -16,6 +19,31 @@ fn main() {
             }),
             ..default()
         }))
+        // Диагностики Bevy — ВРЕМЕННО, для выхода за пределы `GameFlowWall` (2026-10-15).
+        // Наш `PerfStats` меряет только `Update`; здесь — то, что снаружи: FPS/время кадра,
+        // число сущностей, а `RenderDiagnosticsPlugin` даёт проходы рендер-графа.
+        // Регистрировать ПОСЛЕ `DefaultPlugins`: нужен time-plugin.
+        //
+        // `EntityCountDiagnosticsPlugin` — проверка утечки сущностей. Замерено: счётчик
+        // стоит на ~980 без роста, утечки нет (п. 31 инвариантов закрыт).
+        //
+        // `RenderDiagnosticsPlugin` живёт в `bevy::render::diagnostic`, НЕ в
+        // `bevy::diagnostic` — неверный путь делает вид, что плагина нет.
+        // Даёт CPU/GPU-время по проходам (shadow pass, main pass) и pipeline statistics.
+        // Готового счётчика draw calls в Bevy НЕТ — это ближайший прокси.
+        .add_plugins((
+            FrameTimeDiagnosticsPlugin::default(),
+            EntityCountDiagnosticsPlugin::default(),
+            // Интервал вывода. Метода `with_update_interval` не существует — поле
+            // называется `wait_duration`, дефолт ровно `Duration::from_secs(1)`.
+            // Печать идёт ВНУТРИ кадра, поэтому интервал поднят: секунда давала
+            // слишком много шума в выводе рядом с нашим `[PERF]`.
+            LogDiagnosticsPlugin {
+                wait_duration: std::time::Duration::from_secs(5),
+                ..default()
+            },
+            bevy::render::diagnostic::RenderDiagnosticsPlugin,
+        ))
         .add_plugins(TorxelPlugin {
             topology: TorusTopology::new(60, 60),
             world_path: std::path::PathBuf::from("world.bin"),
@@ -43,7 +71,7 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 10000.0,
-            shadow_maps_enabled: true,
+            shadow_maps_enabled:  false,
             ..Default::default()
         },
         Transform::from_xyz(0.0, 100.0, 0.0)

@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::render::mesh_storage::MeshStorage;
 use crate::systems::perf::{Bucket, PerfStats, SwapCopyStats};
 
 // use crate::manager::{ChunkManager, SlotState};
@@ -32,6 +33,7 @@ pub fn debug_report_system(
     mut timer: ResMut<DebugTimer>,
     stats: Res<PerfStats>,
     swap_copy_stats: Res<SwapCopyStats>,
+    mesh_storage: Res<MeshStorage>,
     mut report: Local<String>,
     // manager: Res<ChunkManager>,
     // read_world: Res<ReadWorld>,
@@ -63,6 +65,24 @@ pub fn debug_report_system(
     report.clear();
     stats.report_and_reset(&mut report);
     swap_copy_stats.report_and_reset(&mut report);
+
+    // Сверка с `entity_count` из `EntityCountDiagnosticsPlugin`. Три числа рядом
+    // отвечают на разные вопросы (проверка гипотезы про draw calls, 2026-10-15):
+    //   `live`      — субчанки с мешем и сущностью, то есть реальные draw calls;
+    //   `subchunks` — все ключи хранилища, включая те, что без меша или без сущности;
+    //   `entity_count` — все сущности мира.
+    // `subchunks ≈ live` при `entity_count` вдвое больше → лишние сущности не из
+    // меш-хранилища. `subchunks ≈ entity_count` → есть ключи с сущностью, но вне
+    // `live`, то есть сущности, которые перестали отслеживаться и не деспавнены.
+    {
+        use std::fmt::Write as _;
+        let _ = writeln!(
+            report,
+            "[MESH] live={} subchunks={}",
+            mesh_storage.live.len(),
+            mesh_storage.len()
+        );
+    }
 
     if !report.is_empty() {
         println!("{:?}", report);

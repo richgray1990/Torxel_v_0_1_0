@@ -18,9 +18,19 @@ pub fn poll_background_tasks_system(
     stats: Res<PerfStats>,
     mut flow_start: ResMut<FrameFlowStart>,
 ) {
-    // Первая система цепочки `GameFlowSet` — отмечаем начало для `GameFlowWall`
-    // (диагностика: сравнить с `Frame`, чтобы понять, наш ли пик кадра).
-    flow_start.0 = Some(std::time::Instant::now());
+    // Первая система цепочки `GameFlowSet`. Здесь же закрывается `FrameTail` —
+    // время от конца цепочки ПРОШЛОГО кадра до её начала в этом: `PostUpdate`,
+    // `Last`, extract, prepare, present. Ни один другой бакет туда не достаёт.
+    //
+    // `GameFlowWall + FrameTail` должны в сумме дать `Frame`. Если `Frame` больше —
+    // остаток уходит на планировщик между системами внутри самой цепочки.
+    let now = std::time::Instant::now();
+
+    if let Some(prev_end) = flow_start.end.take() {
+        stats.record(Bucket::FrameTail, now.duration_since(prev_end));
+    }
+
+    flow_start.start = Some(now);
 
     let t = std::time::Instant::now();
     // Забираем ответы на загрузку из канала.

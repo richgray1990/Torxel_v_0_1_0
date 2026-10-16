@@ -46,6 +46,14 @@ pub enum Bucket {
     /// но нигде больше не видно. Печатается со сдвигом на интервал: счётчик
     /// пишется после `report_and_reset`, то есть показывается в следующем отчёте.
     Report,
+    /// Всё, что происходит МЕЖДУ концом нашей цепочки и её началом на следующем
+    /// кадре: `PostUpdate` (в т.ч. propagate `Transform → GlobalTransform`),
+    /// `Last`, extract в render-app, prepare/queue, present, winit.
+    ///
+    /// Ни один другой бакет туда не достаёт: наши системы мерят `Update`,
+    /// `GameFlowWall` — цепочку, render-диагностики — проходы графа.
+    /// `GameFlowWall + FrameTail` должны в сумме дать `Frame`.
+    FrameTail,
     /// Системы, которые до 2026-10-15 не мерились вовсе.
     RequestSwap,
     CameraInput,
@@ -53,7 +61,7 @@ pub enum Bucket {
     BlockInteraction,
 }
 
-pub const BUCKET_COUNT: usize = 23;
+pub const BUCKET_COUNT: usize = 24;
 
 const NAMES: [&str; BUCKET_COUNT] = [
     "Frame",
@@ -75,6 +83,7 @@ const NAMES: [&str; BUCKET_COUNT] = [
     "MeshInsert",
     "GameFlowWall",
     "Report",
+    "FrameTail",
     "RequestSwap",
     "CameraInput",
     "CameraTransform",
@@ -192,11 +201,19 @@ impl PerfStats {
     }
 }
 
-/// Момент начала цепочки `GameFlowSet` текущего кадра. Пишется первой системой
-/// цепочки (`poll_background_tasks_system`), читается последней (`chunk_garbage_collector_system`).
+/// Метки времени для `GameFlowWall` и `FrameTail`.
+///
+/// `start` пишет первая система цепочки (`poll_background_tasks_system`), читает
+/// последняя (`chunk_garbage_collector_system`). `end` — момент конца цепочки
+/// **прошлого** кадра: его читает первая система следующего кадра и получает
+/// `FrameTail` = всё, что легло между концом цепочки и её следующим началом.
+///
 /// `Option` вместо дефолтного `Instant` — на первом кадре читать нечего.
 #[derive(Resource, Default)]
-pub struct FrameFlowStart(pub Option<std::time::Instant>);
+pub struct FrameFlowStart {
+    pub start: Option<std::time::Instant>,
+    pub end: Option<std::time::Instant>,
+}
 
 /// Байтовый объём копии `post_swap_copy_system` за один вызов. Отдельный ресурс,
 /// а не `Bucket`: `PerfStats` хранит наносекунды, байты — другая единица, подсовывать
