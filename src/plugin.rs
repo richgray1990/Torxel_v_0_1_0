@@ -4,13 +4,14 @@ use bevy::prelude::*;
 
 use crate::render::{
     CameraController, camera_input_system, camera_transform_system,
-    init_voxel_material_system,
+    //init_voxel_material_system,
 };
 use crate::render::mesh_storage::MeshStorage;
 use crate::render::render_systems::{
     process_mesh_events_system, build_meshes_system, swap_meshes_system,
-    update_mesh_entities_system, reset_world_origin_system,
+    update_mesh_entities_system, reset_world_origin_system
 };
+use crate::render::entity_pool::{init_voxel_material_and_pool};
 
 use crate::voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
 use crate::voxel::height_map::{HeightMap, ReadHeightMap, WriteHeightMap};
@@ -233,7 +234,7 @@ impl Plugin for TorxelPlugin {
         // ═══════════════════════════════════════════════════════════
 
         // Startup
-        app.add_systems(Startup, (init_voxel_material_system, init_highlight_system, initialize_window_system));
+        app.add_systems(Startup, (init_highlight_system, initialize_window_system, init_voxel_material_and_pool));
 
         // PollPhase (параллельно)
         app.add_systems(

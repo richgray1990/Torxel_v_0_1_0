@@ -7,6 +7,7 @@ use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue};   //-MeshUpdat
 use crate::render::camera::CameraController;
 use crate::render::mesh_builder::{build_subchunk_mesh, HaloBuf, SubchunkMeshData};
 use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState};
+use crate::render::entity_pool::ChunkEntityPool;
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
     CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
@@ -14,6 +15,7 @@ use crate::voxel::format::{
 };
 use crate::voxel::pool::ReadWorld;
 use crate::systems::perf::{Bucket, PerfStats, PERF_ENABLED};
+
 // Точные трейты вместо `rayon::prelude::*`: в файле уже есть `bevy::prelude::*`,
 // и второй глобальный прелюд рискует конфликтом имён.
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};  //-IntoParallelIterator
@@ -42,6 +44,7 @@ pub fn process_mesh_events_system(
     mut mesh_queue: ResMut<MeshUpdateQueue>,
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
+    mut pool: ResMut<ChunkEntityPool>,
     stats: Res<PerfStats>,
 ) {
     let t = std::time::Instant::now();
@@ -93,8 +96,17 @@ pub fn process_mesh_events_system(
                         chunk_z: event.grid_z,
                         subchunk_index: sub_idx,
                     };
-                    if let Some(data) = mesh_storage.remove(&key) {
-                        if let Some(entity) = data.entity {
+                    
+                    if let Some(mut data) = mesh_storage.remove(&key) {
+                        if let Some(entity) = data.entity.take() {
+                            if let Some(slot) = data.pool_slot {
+                                pool.release(slot);
+                                // ТОЛЬКО скрываем
+                                commands.entity(entity)
+                                    .insert(Visibility::Hidden)
+                                    .remove::<PooledChunkEntity>();
+                                continue;
+                            }
                             commands.entity(entity).despawn();
                         }
                     }
@@ -404,14 +416,11 @@ pub fn update_mesh_entities_system(
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
     origin: Res<MeshWorldOrigin>,
+    mut pool: ResMut<ChunkEntityPool>,
     stats: Res<PerfStats>,
 ) {
     let t = std::time::Instant::now();
 
-    // Меши неподвижны: позиция пишется один раз при спавне. Реагируем только на
-    // изменение состава `live` — движение камеры работу больше не порождает.
-    // Это убирает скан целиком в покое И в полёте, оставляя только кадры, где
-    // появился или исчез меш.
     if !mesh_storage.live_dirty {
         stats.record(Bucket::UpdateMeshEntities, t.elapsed());
         return;
@@ -419,16 +428,10 @@ pub fn update_mesh_entities_system(
 
     mesh_storage.live_dirty = false;
 
-    // Проход по живым субчанкам с компакцией на месте: мёртвые ключи
-    // отбрасываются, выжившие сдвигаются к началу.
     let mut r = 0usize;
     let mut w = 0usize;
     let count = mesh_storage.live.len();
 
-    // Кэш позиции на чанк. Все субчанки чанка делят одну позицию: смещения
-    // субчанка по X/Z равны нулю (см. ниже), высота нулевая. `live` приходит
-    // сгруппированным по чанкам, поэтому два `round` на f64 считаются один раз
-    // на чанк, а не на каждый ключ.
     let mut cached_chunk_x = i64::MIN;
     let mut cached_chunk_z = i64::MIN;
     let mut cached_position = Vec3::ZERO;
@@ -437,21 +440,26 @@ pub fn update_mesh_entities_system(
         let key = mesh_storage.live[r];
         r += 1;
 
-        // Фаза 1: одно заимствование — забираем всё нужное и отпускаем.
-        // Оба значения Copy, поэтому дальше `mesh_storage` свободен.
         let (mesh_handle, entity) = {
             let data = match mesh_storage.get_mut(&key) {
                 Some(d) => d,
-                // Чанк выгружен — ключ мёртв, в список не возвращаем.
                 None => continue,
             };
 
             let mesh_handle = match &data.current_mesh {
                 Some(h) => h.clone(),
                 None => {
-                    // Меша нет (субчанк стал пустым) — сущность снимаем, из живых убираем.
                     if let Some(entity) = data.entity.take() {
-                        commands.entity(entity).despawn();
+                        if let Some(slot) = data.pool_slot {
+                            pool.release(slot);
+                            // ТОЛЬКО скрываем
+                            commands.entity(entity)
+                                .insert(Visibility::Hidden)
+                                .remove::<PooledChunkEntity>();
+                            data.pool_slot = None;
+                        } else {
+                            commands.entity(entity).despawn();
+                        }
                     }
                     data.in_live = false;
                     continue;
@@ -461,16 +469,6 @@ pub fn update_mesh_entities_system(
             (mesh_handle, data.entity)
         };
 
-        // Позиция субчанка. Смещения по X/Z не считаем: при `SUBCHUNKS_X = 1`
-        // выражение `subchunk_index % SUBCHUNKS_X` тождественно нулю, а
-        // `subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)` равно нулю для любого
-        // индекса < SUBCHUNKS_PER_CHUNK. Мир по вертикали живёт в нуле.
-        //
-        // Меш ставится в АБСОЛЮТНУЮ координату минус плавающее начало (`origin`),
-        // один раз при спавне, и больше не двигается. Из бесконечного числа копий
-        // чанка вдоль тора берётся ближайшая к якорю камеры: тогда смежные чанки
-        // не разъезжаются на ширину мира. Раньше это делал `normalize_dx` каждый
-        // кадр, теперь — только при спавне, и результат живёт в `Transform`.
         let position = if key.chunk_x == cached_chunk_x && key.chunk_z == cached_chunk_z {
             cached_position
         } else {
@@ -489,29 +487,41 @@ pub fn update_mesh_entities_system(
             cached_position
         };
 
-        // Фаза 2: позиционирование. Пишем позицию только для свежей сущности —
-        // у существующих мешей она уже верна и не меняется при движении камеры.
-        // Холостая запись в `Transform` пометила бы компонент изменённым и
-        // заставила Bevy пересчитать `GlobalTransform` и скопировать его в
-        // render world — именно это и съедало 68% кадра.
-        //
-        // Переживание ключа решается здесь же, без третьего обращения в хранилище:
-        // `current_mesh` уже известен (мы только что взяли из него `mesh_handle`),
-        // `entity` отслеживается локально.
         match entity {
             Some(_) => {}
             None => {
-                let entity = commands
-                    .spawn((
+                if let Some(slot) = pool.acquire() {
+                    let entity = pool.entity(slot).unwrap();
+                    pool.activate(slot);
+                    
+                    // Перезаписываем компоненты (MeshMaterial3d уже есть)
+                    commands.entity(entity).insert((
                         Mesh3d(mesh_handle),
-                        MeshMaterial3d(voxel_material.0.clone()),
                         Transform::from_translation(position),
-                        Visibility::default(),
-                    ))
-                    .id();
+                        Visibility::Visible,
+                        PooledChunkEntity { slot },
+                    ));
 
-                if let Some(d) = mesh_storage.get_mut(&key) {
-                    d.entity = Some(entity);
+                    if let Some(d) = mesh_storage.get_mut(&key) {
+                        d.entity = Some(entity);
+                        d.pool_slot = Some(slot);
+                    }
+                } else {
+                    error!("Chunk entity pool exhausted!");
+                    
+                    let entity = commands
+                        .spawn((
+                            Mesh3d(mesh_handle),
+                            MeshMaterial3d(voxel_material.0.clone()),
+                            Transform::from_translation(position),
+                            Visibility::Visible,
+                        ))
+                        .id();
+
+                    if let Some(d) = mesh_storage.get_mut(&key) {
+                        d.entity = Some(entity);
+                        d.pool_slot = None;
+                    }
                 }
             }
         }
@@ -578,4 +588,10 @@ pub fn reset_world_origin_system(
 fn find_chunk_slot(window: &ReadWindowManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {
     let (cx, cz) = window.normalize_chunk(chunk_x, chunk_z);
     window.slot_for_chunk(cx, cz)
+}
+
+/// Маркер для pooled сущностей, хранит индекс слота в пуле
+#[derive(Component)]
+pub struct PooledChunkEntity {
+    pub slot: usize,
 }

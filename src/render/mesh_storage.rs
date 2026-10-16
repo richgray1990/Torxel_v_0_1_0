@@ -24,6 +24,7 @@ pub struct SubchunkRenderData {
     pub chunk_x: i64,
     pub chunk_z: i64,
     pub subchunk_index: usize,
+    pub pool_slot: Option<usize>,
     /// Ключ присутствует в `MeshStorage::live`. Защита от дублей: `live`
     /// долгоживущий, и без флага повторный переход в `Ready` добавил бы ключ дважды.
     pub in_live: bool,
@@ -39,6 +40,7 @@ impl SubchunkRenderData {
             chunk_x,
             chunk_z,
             subchunk_index,
+            pool_slot: None,
             in_live: false,
         }
     }

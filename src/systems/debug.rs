@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::render::entity_pool::ChunkEntityPool;
 use crate::render::mesh_storage::MeshStorage;
 use crate::systems::perf::{Bucket, PerfStats, SwapCopyStats};
 
@@ -35,6 +36,7 @@ pub fn debug_report_system(
     swap_copy_stats: Res<SwapCopyStats>,
     mesh_storage: Res<MeshStorage>,
     mut report: Local<String>,
+    pool: Res<ChunkEntityPool>,
     // manager: Res<ChunkManager>,
     // read_world: Res<ReadWorld>,
     // write_world: Res<WriteWorld>,
@@ -88,6 +90,7 @@ pub fn debug_report_system(
         println!("{:?}", report);
     }
 
+    println!("[POOL DATA]: Active: {}, Entity: {}, Free: {}", pool.active_len(), pool.entity_len(), pool.free_len());
     // Замер самой этой системы — вместе с печатью, то есть вместе с IO в терминал.
     // Пишется ПОСЛЕ `report_and_reset`, поэтому покажется в следующем отчёте (сдвиг
     // на интервал). Иначе пришлось бы либо не мерить, либо обнулять счётчик дважды.
