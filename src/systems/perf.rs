@@ -59,9 +59,13 @@ pub enum Bucket {
     CameraInput,
     CameraTransform,
     BlockInteraction,
+    /// Однократная перекладка мира при сбросе плавающего начала координат.
+    /// В обычном кадре — ранний выход, то есть примерно ноль. Ненулевое значение
+    /// означает, что этот кадр содержит перекладку всех живых мешей.
+    ResetOrigin,
 }
 
-pub const BUCKET_COUNT: usize = 24;
+pub const BUCKET_COUNT: usize = 25;
 
 const NAMES: [&str; BUCKET_COUNT] = [
     "Frame",
@@ -88,6 +92,7 @@ const NAMES: [&str; BUCKET_COUNT] = [
     "CameraInput",
     "CameraTransform",
     "BlockInteraction",
+    "ResetOrigin",
 ];
 
 impl Bucket {

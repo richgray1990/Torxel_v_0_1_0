@@ -77,13 +77,10 @@ pub struct MeshStorage {
     pub live: Vec<SubchunkKey>,
 
     /// `live` изменился с прошлого кадра (добавление или удаление ключа).
+    /// Меши неподвижны, поэтому это единственный триггер для
+    /// `update_mesh_entities_system`: разбор списка нужен только когда в нём
+    /// появилось или исчезло что-то новое.
     pub live_dirty: bool,
-
-    /// Якорь камеры на прошлом кадре. Позиции мешей пересчитываются только
-    /// когда он сдвинулся: иначе запись в `Transform` каждый кадр заставляла бы
-    /// Bevy пересчитывать `GlobalTransform` у всех сущностей впустую.
-    pub last_anchor_x: f64,
-    pub last_anchor_z: f64,
 }
 
 impl MeshStorage {
@@ -94,8 +91,6 @@ impl MeshStorage {
             pending_swap: Vec::with_capacity(MAX_SUBCHUNKS),
             live: Vec::with_capacity(MAX_SUBCHUNKS),
             live_dirty: false,
-            last_anchor_x: f64::NAN,
-            last_anchor_z: f64::NAN,
         }
     }
 

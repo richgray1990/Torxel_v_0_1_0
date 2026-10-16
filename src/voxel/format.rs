@@ -79,6 +79,24 @@ pub struct WorldDimensions {
     pub height: f64,
 }
 
+/// Порог сброса плавающего начала координат, в блоках.
+/// При |якорь − origin| > порога мир однократно перекладывается, а якорь
+/// возвращается к нулю. Число выбрано по точности f32: на 1e5 шаг `f32`
+/// равен 0.0078 блока (дрожания нет), на 1e6 — уже 0.0625.
+pub const ORIGIN_RESET_THRESHOLD: f64 = 100_000.0;
+
+/// Плавающее начало координат: сколько блоков мира уже «выброшено» сбросами.
+///
+/// Позиция меша = абсолютная координата минус `origin`. Меш ставится один раз
+/// при спавне и больше не двигается, поэтому в установившемся режиме записей
+/// `Transform` нет вообще — за это платит однократная перекладка всех живых
+/// мешей при пересечении [`ORIGIN_RESET_THRESHOLD`].
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct MeshWorldOrigin {
+    pub x: f64,
+    pub z: f64,
+}
+
 impl WorldDimensions {
     pub fn new(chunks_x: u32, chunks_z: u32) -> Self {
         Self {
@@ -116,37 +134,37 @@ impl WorldDimensions {
         r
     }
 
-    #[inline]
-    pub fn normalize_dx(&self, from_x: f64, to_x: f64) -> f64 {
-        let w = self.width;
-        if w <= 0.0 {
-            return to_x - from_x;
-        }
+    // #[inline]
+    // pub fn normalize_dx(&self, from_x: f64, to_x: f64) -> f64 {
+    //     let w = self.width;
+    //     if w <= 0.0 {
+    //         return to_x - from_x;
+    //     }
 
-        let d = (to_x - from_x).rem_euclid(w);
+    //     let d = (to_x - from_x).rem_euclid(w);
 
-        if d > w * 0.5 {
-            d - w
-        } else {
-            d
-        }
-    }
+    //     if d > w * 0.5 {
+    //         d - w
+    //     } else {
+    //         d
+    //     }
+    // }
 
-    #[inline]
-    pub fn normalize_dz(&self, from_z: f64, to_z: f64) -> f64 {
-        let d = self.depth;
-        if d <= 0.0 {
-            return to_z - from_z;
-        }
+    // #[inline]
+    // pub fn normalize_dz(&self, from_z: f64, to_z: f64) -> f64 {
+    //     let d = self.depth;
+    //     if d <= 0.0 {
+    //         return to_z - from_z;
+    //     }
 
-        let v = (to_z - from_z).rem_euclid(d);
+    //     let v = (to_z - from_z).rem_euclid(d);
 
-        if v > d * 0.5 {
-            v - d
-        } else {
-            v
-        }
-    }
+    //     if v > d * 0.5 {
+    //         v - d
+    //     } else {
+    //         v
+    //     }
+    // }
 
     // #[inline]
     // pub fn normalize_dx(&self, from_x: f64, to_x: f64) -> f64 {

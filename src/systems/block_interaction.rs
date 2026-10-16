@@ -16,7 +16,7 @@ use crate::manager::ReadWindowManager;
 use crate::queues::cell_events::{CellEvent, CellEventQueue};
 use crate::render::camera::CameraController;
 use crate::systems::perf::{Bucket, PerfStats};
-use crate::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, WorldDimensions};
+use crate::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, MeshWorldOrigin, WorldDimensions};
 use crate::voxel::materials::{ids};//-, phases
 use crate::voxel::pool::ReadWorld;
 
@@ -87,6 +87,7 @@ pub fn block_interaction_system(
     mut events: ResMut<CellEventQueue>,
     mut commands: Commands,
     mut highlight: ResMut<HighlightState>,
+    origin: Res<MeshWorldOrigin>,
     stats: Res<PerfStats>,
 ) {
     let t = std::time::Instant::now();
@@ -134,11 +135,12 @@ pub fn block_interaction_system(
         return;
     };
 
-    // Камера локальная: её X/Z живут вокруг нуля.
-    // Возвращаем луч в мировые координаты.
-    let origin_x = dimensions.wrap_x(controller.anchor_x + ray.origin.x as f64);
+    // Якорь камеры — абсолютная мировая координата (начало координат плавающее,
+    // но луч ищет по настоящим мировым координатам, поэтому сдвиг здесь не нужен).
+    // Торическая нормализация живёт внутри поиска блока, `normalize_block`.
+    let origin_x = controller.anchor_x + ray.origin.x as f64;
     let origin_y = ray.origin.y as f64;
-    let origin_z = dimensions.wrap_z(controller.anchor_z + ray.origin.z as f64);
+    let origin_z = controller.anchor_z + ray.origin.z as f64;
 
     let dir_x = ray.direction.x as f64;
     let dir_y = ray.direction.y as f64;
@@ -164,6 +166,7 @@ pub fn block_interaction_system(
                 &mut highlight,
                 &controller,
                 &dimensions,
+                &origin,
                 hit,
             ),
             None => hide_highlight(&mut commands, highlight.entity),
@@ -230,6 +233,7 @@ fn show_highlight(
     highlight: &mut HighlightState,
     controller: &CameraController,
     dimensions: &WorldDimensions,
+    origin: &MeshWorldOrigin,
     hit: VoxelHit,
 ) {
     let (Some(mesh), Some(material)) = (highlight.mesh.clone(), highlight.material.clone()) else {
@@ -257,11 +261,16 @@ fn show_highlight(
     let world_y = hit.ly as f64 + 0.5;
     let world_z = hit.chunk_z as f64 * CHUNK_SIDE as f64 + hit.lz as f64 + 0.5;
 
-    // Переводим в локальную систему рендера относительно якоря камеры.
-    let offset_x = dimensions.normalize_dx(controller.anchor_x, world_x);
-    let offset_z = dimensions.normalize_dz(controller.anchor_z, world_z);
+    // Переводим в систему отсчёта мешей: абсолютная координата минус плавающее
+    // начало. Ту же формулу использует спавн меша, поэтому маркер не разъедется
+    // с блоком. Копию вдоль тора берём ближайшую к якорю — как и у мешей.
+    let copy_x = ((controller.anchor_x - world_x) / dimensions.width).round();
+    let copy_z = ((controller.anchor_z - world_z) / dimensions.depth).round();
 
-    let position = Vec3::new(offset_x as f32, world_y as f32, offset_z as f32);
+    let local_x = world_x + dimensions.width * copy_x - origin.x;
+    let local_z = world_z + dimensions.depth * copy_z - origin.z;
+
+    let position = Vec3::new(local_x as f32, world_y as f32, local_z as f32);
 
     // Немного увеличиваем, чтобы маркер не сливался с гранями блока.
     let transform = Transform {

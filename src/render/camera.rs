@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 use crate::systems::perf::{Bucket, PerfStats};
+use crate::voxel::format::MeshWorldOrigin;
 
 const PITCH_SPEED: f32 = 45.0;
 const MOVE_SPEED: f32 = 64.0;
@@ -189,6 +190,7 @@ pub fn camera_input_system(
 
 pub fn camera_transform_system(
     controller: Res<CameraController>,
+    origin: Res<MeshWorldOrigin>,
     mut camera_query: Query<(&mut Transform, &mut GlobalTransform), With<Camera3d>>,
     stats: Res<PerfStats>,
 ) {
@@ -196,23 +198,23 @@ pub fn camera_transform_system(
     let look_dir = controller.look_direction();
     let distance = controller.camera_height / controller.pitch.sin().max(0.001);
 
-    // Камера живёт в локальном пространстве вокруг (0, anchor_y, 0).
-    // Меши смещаются относительно якоря через normalize_dx/dz.
-    let local_camera_pos = Vec3::new(
-        -look_dir.x * distance,
+    // Камера живёт в той же системе отсчёта, что и меши: абсолютный якорь минус
+    // плавающее начало. Меши неподвижны, едет камера — это одна запись
+    // `Transform` в кадр вместо ~340.
+    let anchor_x = (controller.anchor_x - origin.x) as f32;
+    let anchor_z = (controller.anchor_z - origin.z) as f32;
+
+    let camera_pos = Vec3::new(
+        anchor_x - look_dir.x * distance,
         controller.anchor_y as f32 - look_dir.y * distance,
-        -look_dir.z * distance,
+        anchor_z - look_dir.z * distance,
     );
 
-    let local_target = Vec3::new(
-        0.0,
-        controller.anchor_y as f32,
-        0.0,
-    );
+    let target = Vec3::new(anchor_x, controller.anchor_y as f32, anchor_z);
 
     for (mut transform, mut global_transform) in camera_query.iter_mut() {
-        let new_transform = Transform::from_translation(local_camera_pos)
-            .looking_at(local_target, Vec3::Y);
+        let new_transform = Transform::from_translation(camera_pos)
+            .looking_at(target, Vec3::Y);
 
         *transform = new_transform;
 

@@ -10,7 +10,7 @@ use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, 
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
     CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
-    SUBCHUNK_HEIGHT, WorldDimensions,
+    SUBCHUNK_HEIGHT, MeshWorldOrigin, ORIGIN_RESET_THRESHOLD, WorldDimensions,
 };
 use crate::voxel::pool::ReadWorld;
 use crate::systems::perf::{Bucket, PerfStats, PERF_ENABLED};
@@ -403,36 +403,32 @@ pub fn update_mesh_entities_system(
     voxel_material: Res<VoxelMaterialHandle>,
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
-    mut transforms: Query<&mut Transform>,
+    origin: Res<MeshWorldOrigin>,
     stats: Res<PerfStats>,
 ) {
     let t = std::time::Instant::now();
 
-    // Камера стоит на месте и состав мешей не менялся — работать не над чем.
-    // Это убирает скан целиком в покое. Сравнение с `NAN` даёт `true` на первом
-    // кадре: якорь заведомо «другой», и список разбирается полностью.
-    let anchor_moved = controller.anchor_x != mesh_storage.last_anchor_x
-        || controller.anchor_z != mesh_storage.last_anchor_z;
-
-    if !anchor_moved && !mesh_storage.live_dirty {
+    // Меши неподвижны: позиция пишется один раз при спавне. Реагируем только на
+    // изменение состава `live` — движение камеры работу больше не порождает.
+    // Это убирает скан целиком в покое И в полёте, оставляя только кадры, где
+    // появился или исчез меш.
+    if !mesh_storage.live_dirty {
         stats.record(Bucket::UpdateMeshEntities, t.elapsed());
         return;
     }
 
-    mesh_storage.last_anchor_x = controller.anchor_x;
-    mesh_storage.last_anchor_z = controller.anchor_z;
     mesh_storage.live_dirty = false;
 
-    // Проход по живым субчанкам (~512 из 8192) с компакцией на месте: мёртвые
-    // ключи отбрасываются, выжившие сдвигаются к началу.
+    // Проход по живым субчанкам с компакцией на месте: мёртвые ключи
+    // отбрасываются, выжившие сдвигаются к началу.
     let mut r = 0usize;
     let mut w = 0usize;
     let count = mesh_storage.live.len();
 
     // Кэш позиции на чанк. Все субчанки чанка делят одну позицию: смещения
     // субчанка по X/Z равны нулю (см. ниже), высота нулевая. `live` приходит
-    // сгруппированным по чанкам, поэтому `normalize_dx/dz` (два `rem_euclid` на
-    // f64, то есть деления) считаются один раз на чанк, а не на каждый ключ.
+    // сгруппированным по чанкам, поэтому два `round` на f64 считаются один раз
+    // на чанк, а не на каждый ключ.
     let mut cached_chunk_x = i64::MIN;
     let mut cached_chunk_z = i64::MIN;
     let mut cached_position = Vec3::ZERO;
@@ -468,49 +464,42 @@ pub fn update_mesh_entities_system(
         // Позиция субчанка. Смещения по X/Z не считаем: при `SUBCHUNKS_X = 1`
         // выражение `subchunk_index % SUBCHUNKS_X` тождественно нулю, а
         // `subchunk_index / (SUBCHUNKS_X * SUBCHUNKS_Y)` равно нулю для любого
-        // индекса < 32. Мир по вертикали живёт в нуле (`world_y = 0.0`).
+        // индекса < SUBCHUNKS_PER_CHUNK. Мир по вертикали живёт в нуле.
+        //
+        // Меш ставится в АБСОЛЮТНУЮ координату минус плавающее начало (`origin`),
+        // один раз при спавне, и больше не двигается. Из бесконечного числа копий
+        // чанка вдоль тора берётся ближайшая к якорю камеры: тогда смежные чанки
+        // не разъезжаются на ширину мира. Раньше это делал `normalize_dx` каждый
+        // кадр, теперь — только при спавне, и результат живёт в `Transform`.
         let position = if key.chunk_x == cached_chunk_x && key.chunk_z == cached_chunk_z {
             cached_position
         } else {
-            let world_x = key.chunk_x as f64 * CHUNK_SIDE as f64;
-            let world_z = key.chunk_z as f64 * CHUNK_SIDE as f64;
+            let base_x = key.chunk_x as f64 * CHUNK_SIDE as f64;
+            let base_z = key.chunk_z as f64 * CHUNK_SIDE as f64;
 
-            let offset_x = dimensions.normalize_dx(controller.anchor_x, world_x);
-            let offset_z = dimensions.normalize_dz(controller.anchor_z, world_z);
+            let copy_x = ((controller.anchor_x - base_x) / dimensions.width).round();
+            let copy_z = ((controller.anchor_z - base_z) / dimensions.depth).round();
+
+            let local_x = base_x + dimensions.width * copy_x - origin.x;
+            let local_z = base_z + dimensions.depth * copy_z - origin.z;
 
             cached_chunk_x = key.chunk_x;
             cached_chunk_z = key.chunk_z;
-            cached_position = Vec3::new(offset_x as f32, 0.0, offset_z as f32);
+            cached_position = Vec3::new(local_x as f32, 0.0, local_z as f32);
             cached_position
         };
 
-        // Фаза 2: позиционирование. Якорь не двигался — запись в `Transform` была бы
-        // холостой, но всё равно пометила бы компонент изменённым и заставила Bevy
-        // пересчитать `GlobalTransform`. Существующие меши трогаем только при сдвиге
-        // камеры, свежую сущность ставим сразу.
+        // Фаза 2: позиционирование. Пишем позицию только для свежей сущности —
+        // у существующих мешей она уже верна и не меняется при движении камеры.
+        // Холостая запись в `Transform` пометила бы компонент изменённым и
+        // заставила Bevy пересчитать `GlobalTransform` и скопировать его в
+        // render world — именно это и съедало 68% кадра.
         //
         // Переживание ключа решается здесь же, без третьего обращения в хранилище:
         // `current_mesh` уже известен (мы только что взяли из него `mesh_handle`),
         // `entity` отслеживается локально.
         match entity {
-            Some(entity) => {
-                if anchor_moved {
-                    match transforms.get_mut(entity) {
-                        Ok(mut transform) => transform.translation = position,
-                        Err(_) => {
-                            // Сущность удалена извне (деспавн меша). Ссылку надо
-                            // сбросить, иначе позиция такого меша не обновится уже
-                            // никогда: ветка ниже её не пересоздаст. Ключ уходит из
-                            // живых, и меш будет пересоздан.
-                            if let Some(d) = mesh_storage.get_mut(&key) {
-                                d.entity = None;
-                                d.in_live = false;
-                            }
-                            continue;
-                        }
-                    }
-                }
-            }
+            Some(_) => {}
             None => {
                 let entity = commands
                     .spawn((
@@ -534,6 +523,56 @@ pub fn update_mesh_entities_system(
     mesh_storage.live.truncate(w);
 
     stats.record(Bucket::UpdateMeshEntities, t.elapsed());
+}
+
+/// Однократная перекладка мира при уходе камеры слишком далеко от начала координат.
+///
+/// Работает только тогда, когда `|якорь − начало|` превысил
+/// [`ORIGIN_RESET_THRESHOLD`]: начало сдвигается на накопленный якорь, а все
+/// живые меши и якорь камеры переезжают на ту же величину. Тем самым мир
+/// остаётся на месте, а координаты не растут до значений, где `f32` начинает
+/// дрожать. Событие редкое (раз в 100 000 блоков пролёта), поэтому простительно
+/// потратить на него один долгий кадр.
+pub fn reset_world_origin_system(
+    mut origin: ResMut<MeshWorldOrigin>,
+    mut controller: ResMut<CameraController>,
+    mesh_storage: Res<MeshStorage>,
+    mut transforms: Query<&mut Transform>,
+    stats: Res<PerfStats>,
+) {
+    let t = std::time::Instant::now();
+
+    if controller.anchor_x.abs() <= ORIGIN_RESET_THRESHOLD
+        && controller.anchor_z.abs() <= ORIGIN_RESET_THRESHOLD
+    {
+        stats.record(Bucket::ResetOrigin, t.elapsed());
+        return;
+    }
+
+    let shift_x = controller.anchor_x;
+    let shift_z = controller.anchor_z;
+
+    origin.x += shift_x;
+    origin.z += shift_z;
+    controller.anchor_x = 0.0;
+    controller.anchor_z = 0.0;
+
+    // Перекладываем живые меши. Ключ без сущности здесь безвреден: его позиция
+    // будет посчитана заново при следующем разборе `live`, где `origin` уже новый.
+    for key in mesh_storage.live.iter() {
+        let Some(data) = mesh_storage.get(key) else {
+            continue;
+        };
+        let Some(entity) = data.entity else {
+            continue;
+        };
+        if let Ok(mut transform) = transforms.get_mut(entity) {
+            transform.translation.x -= shift_x as f32;
+            transform.translation.z -= shift_z as f32;
+        }
+    }
+
+    stats.record(Bucket::ResetOrigin, t.elapsed());
 }
 
 fn find_chunk_slot(window: &ReadWindowManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {

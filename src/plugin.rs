@@ -9,12 +9,12 @@ use crate::render::{
 use crate::render::mesh_storage::MeshStorage;
 use crate::render::render_systems::{
     process_mesh_events_system, build_meshes_system, swap_meshes_system,
-    update_mesh_entities_system,
+    update_mesh_entities_system, reset_world_origin_system,
 };
 
 use crate::voxel::pool::{ChunkPool, ReadWorld, WriteWorld};
 use crate::voxel::height_map::{HeightMap, ReadHeightMap, WriteHeightMap};
-use crate::voxel::format::POOL_CHUNK_COUNT;
+use crate::voxel::format::{MeshWorldOrigin, POOL_CHUNK_COUNT};
 use crate::voxel::topology::TorusTopology;
 use crate::io::channels::IoManager;
 use crate::io::file_format::WorldHeader;
@@ -144,6 +144,7 @@ impl Plugin for TorxelPlugin {
         
         app.init_resource::<CameraController>();
         app.init_resource::<MeshStorage>();
+        app.init_resource::<MeshWorldOrigin>();
         app.init_resource::<DebugTimer>();
         app.init_resource::<PerfStats>();
         app.init_resource::<FrameFlowStart>();
@@ -275,7 +276,19 @@ impl Plugin for TorxelPlugin {
             Update,
             camera_input_system.in_set(UpdatePhaseSet::UpdateWindow),
         );
-        
+
+        // Сброс плавающего начала координат. Обязан идти РАНЬШЕ
+        // `camera_transform_system` (та читает `MeshWorldOrigin`, иначе камера
+        // отстала бы на кадр) и раньше `update_mesh_entities_system` (та считает
+        // позицию новых мешей от `origin`). Пишет `ResMut<CameraController>`, из-за
+        // чего планировщик сам поставит её после ввода и до трансформа камеры.
+        app.add_systems(
+            Update,
+            reset_world_origin_system
+                .in_set(UpdatePhaseSet::UpdateWindow)
+                .before(camera_transform_system),
+        );
+
         // SwapPointers
         app.add_systems(
             Update,
