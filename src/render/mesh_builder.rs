@@ -7,7 +7,7 @@ use crate::voxel::format::{
     SUBCHUNKS_X, SUBCHUNKS_Y,
 };
 use crate::voxel::height_map::column_index;
-use crate::voxel::materials::{get_material, ids, is_transparent};
+use crate::voxel::materials::{mat_lut, MatLut, ids};
 use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
@@ -174,6 +174,10 @@ pub fn build_subchunk_mesh(
     let tops = window.height_map.column_slice(slot);
     let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
 
+    // LUT материалов: цвет/opacity/transparent — прямой доступ по id вместо
+    // линейного поиска по MATERIALS на каждый блок и каждую грань.
+    let lut: &MatLut = mat_lut();
+
     for lz in sub_z..sub_z + SUBCHUNK_SIDE {
         for lx in sub_x..sub_x + SUBCHUNK_SIDE {
             // Верхний воздушный `y` колонки: выше него блоков нет по определению
@@ -197,28 +201,30 @@ pub fn build_subchunk_mesh(
 
                 let material_id = halo.get(hx, hy, hz);
 
-                if material_id == ids::AIR {
+                // Двойной guard вместо прежних `== AIR` + `get_material().None`:
+                // воздух (самый частый случай) отсекается первой проверкой без
+                // обращения к LUT; второй проверяет незарегистрированные id —
+                // в реальных мирах он всегда true и предсказуем для CPU.
+                if material_id == ids::AIR || !lut.known[material_id as usize] {
                     continue;
                 }
 
-                let material = match get_material(material_id) {
-                    Some(m) => m,
-                    None => continue,
-                };
+                let material_id = material_id as usize;
+                let color = lut.color[material_id];
+                let a = lut.opacity[material_id];
 
                 for (face_idx, (dx, dy, dz)) in FACES.iter().enumerate() {
                     let nbx = (hx as i64 + dx) as usize;
                     let nby = (hy as i64 + dy) as usize;
                     let nbz = (hz as i64 + dz) as usize;
 
-                    let visible = is_face_visible(halo, nbx, nby, nbz);
+                    let visible = is_face_visible(lut, halo, nbx, nby, nbz);
 
                     if visible {
                         let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.15;
-                        let r = material.color[0] as f32 / 255.0 * brightness;
-                        let g = material.color[1] as f32 / 255.0 * brightness;
-                        let b = material.color[2] as f32 / 255.0 * brightness;
-                        let a = material.opacity;
+                        let r = color[0] as f32 / 255.0 * brightness;
+                        let g = color[1] as f32 / 255.0 * brightness;
+                        let b = color[2] as f32 / 255.0 * brightness;
 
                         let normal = FACE_NORMALS[face_idx];
                         let face_verts = FACE_VERTICES[face_idx];
@@ -280,49 +286,76 @@ fn fill_halo(
         }
     }
 
+    // Прежний обход писал все 5832 байта halo поэлементно и столько же раз
+    // читал пул колонками с шагом `size_of::<Cell>()` (прыжки через 512
+    // колонок), включая области над картой высот, где блоков нет по
+    // определению. Новый обход сохраняет ровно те же адреса источника для
+    // каждой ячейки halo — `(hx, hy, hz)` отображается в тот же `pool.get(s,
+    // column_base + y)`, что и раньше, — но меняет порядок доступа на
+    // row-major: строка `(hy, hz)` читается прогоном по hx и пишется одним
+    // contiguous-слайсом. Соседние hx при фиксированных (y, hz) лежат в пуле
+    // подряд (layout `(local_z*16 + local_x)*CHUNK_HEIGHT + y`), поэтому ряд
+    // вычитается плотнее, чем прежний шаг вдоль y.
+    #[inline(always)]
+    const fn row_start(hy: usize, hz: usize) -> usize {
+        (hz * HALO_HEIGHT + hy) * HALO_SIDE
+    }
+
     for hz in 0..HALO_SIDE {
+        let world_z = (sub_z + hz) as isize - 1;
+        let dz = world_z.div_euclid(CHUNK_SIDE as isize);
+        let local_z = world_z.rem_euclid(CHUNK_SIDE as isize) as usize;
+
+        // Для каждого hx ∈ 0..18: слот чанка (dx,dz) и индекс колонки внутри
+        // него. Совпадают с прежними выражениями, просто вынесены из hy-цикла.
+        let mut col_of: [usize; HALO_SIDE] = [0; HALO_SIDE];
+        let mut slot_of: [Option<usize>; HALO_SIDE] = [None; HALO_SIDE];
         for hx in 0..HALO_SIDE {
             let world_x = (sub_x + hx) as isize - 1;
-            let world_z = (sub_z + hz) as isize - 1;
             let dx = world_x.div_euclid(CHUNK_SIDE as isize);
-            let dz = world_z.div_euclid(CHUNK_SIDE as isize);
             let local_x = world_x.rem_euclid(CHUNK_SIDE as isize) as usize;
-            let local_z = world_z.rem_euclid(CHUNK_SIDE as isize) as usize;
-
             // `dx`/`dz` ∈ {-1, 0, 1}; +1 приводит их к тем же 0..3, что и в таблице выше.
-            let neighbor_slot = neighbor_slots[((dx + 1) + (dz + 1) * 3) as usize];
-            let column_base = (local_z * CHUNK_SIDE + local_x) * CHUNK_HEIGHT;
+            slot_of[hx] = neighbor_slots[((dx + 1) + (dz + 1) * 3) as usize];
+            col_of[hx] = local_z * CHUNK_SIDE + local_x;
+        }
 
-            for hy in 0..HALO_HEIGHT {
-                // `hy = 0` → `y = sub_y - 1`; `hy = 17` → `y = sub_y + SUBCHUNK_HEIGHT`.
-                let y_signed = sub_y as isize + hy as isize - 1;
+        for hy in 0..HALO_HEIGHT {
+            // `hy = 0` → `y = sub_y - 1`; `hy = 17` → `y = sub_y + SUBCHUNK_HEIGHT`.
+            let y_signed = sub_y as isize + hy as isize - 1;
+            let row = &mut halo.cells[row_start(hy, hz)..][..HALO_SIDE];
 
-                let material_id = if y_signed < 0 {
-                    HALO_OPAQUE
-                } else if y_signed >= CHUNK_HEIGHT as isize {
-                    ids::AIR
-                } else {
-                    match neighbor_slot {
-                        Some(s) => pool.get(s, column_base + y_signed as usize).material_id,
-                        // Слота соседа нет — это край активного окна. Считаем его
-                        // сплошным (`HALO_OPAQUE`), чтобы на границе окна не строились
-                        // стены: за краем всё равно ничего не видно, а пересборка при
-                        // изменении состава соседей (инвалидация) больше не нужна.
-                        //
-                        // Раньше здесь был `ids::AIR` (семантика прежней
-                        // `is_face_visible`: «соседа нет → грань видна»), и граница
-                        // окна рисовалась стеной. Возврат к AIR вернёт стены и
-                        // потребует снова включить `invalidate_neighbors`.
-                        None => HALO_OPAQUE,
-                    }
+            if y_signed < 0 {
+                // Под `y = 0` соседа нет — грани не рисуются, нужен
+                // существующий непрозрачный материал.
+                row.fill(HALO_OPAQUE);
+                continue;
+            }
+            if y_signed >= CHUNK_HEIGHT as isize {
+                row.fill(ids::AIR);
+                continue;
+            }
+            let y = y_signed as usize;
+
+            for hx in 0..HALO_SIDE {
+                row[hx] = match slot_of[hx] {
+                    Some(s) => pool.get(s, col_of[hx] * CHUNK_HEIGHT + y).material_id,
+                    // Слота соседа нет — это край активного окна. Считаем его
+                    // сплошным (`HALO_OPAQUE`), чтобы на границе окна не строились
+                    // стены: за краем всё равно ничего не видно, а пересборка при
+                    // изменении состава соседей (инвалидация) больше не нужна.
+                    //
+                    // Раньше здесь был `ids::AIR` (семантика прежней
+                    // `is_face_visible`: «соседа нет → грань видна»), и граница
+                    // окна рисовалась стеной. Возврат к AIR вернёт стены и
+                    // потребует снова включить `invalidate_neighbors`.
+                    None => HALO_OPAQUE,
                 };
-
-                halo.set(hx, hy, hz, material_id);
             }
         }
     }
 }
 
-fn is_face_visible(halo: &HaloBuf, hx: usize, hy: usize, hz: usize) -> bool {
-    is_transparent(halo.get(hx, hy, hz))
+#[inline(always)]
+fn is_face_visible(lut: &MatLut, halo: &HaloBuf, hx: usize, hy: usize, hz: usize) -> bool {
+    lut.transparent[halo.get(hx, hy, hz) as usize]
 }

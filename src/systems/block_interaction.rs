@@ -48,6 +48,16 @@ struct VoxelHit {
     ly: usize,
     lz: usize,
     cell_index: usize,
+
+    /// Абсолютные мировые координаты блока (для соседа-цели при установке).
+    wx: i64,
+    wy: i64,
+    wz: i64,
+
+    /// Ось, по которой луч вошёл в hit-воксель (0=X, 1=Y, 2=Z), и шаг DDA
+    /// по этой оси (+1/-1). Сосед-цель для установки: hit - step * unit_axis.
+    entry_axis: u8,
+    entry_step: i64,
 }
 
 /// Создаёт ресурсы подсветки один раз при старте.
@@ -135,16 +145,36 @@ pub fn block_interaction_system(
         return;
     };
 
-    // Якорь камеры — абсолютная мировая координата (начало координат плавающее,
-    // но луч ищет по настоящим мировым координатам, поэтому сдвиг здесь не нужен).
-    // Торическая нормализация живёт внутри поиска блока, `normalize_block`.
-    let origin_x = controller.anchor_x + ray.origin.x as f64;
+    // Схема «камера двигается, мир стоит»: Transform камеры (и, соответственно,
+    // ray.origin из viewport_to_world) живёт в системе отсчёта мешей —
+    // абсолютная позиция минус плавающее начало (`camera_transform_system`:
+    // cam_mesh = cam_abs - origin). DDA ищет блоки по абсолютным мировым
+    // координатам, поэтому переводим начало луча обратно:
+    // world = mesh_local + origin. Якорь здесь НЕ прибавляем: он уже входит
+    // в cam_abs, а cam_mesh = cam_abs - origin. Прежняя формула
+    // world = anchor + ray.origin добавляла якорь второй раз — ошибка росла
+    // линейно со смещением камеры (hit улетал всё дальше при движении).
+    // При origin == 0 (старое поведение «мир сдвигается к якорю») эта же
+    // формула сводится к world = cam_abs = anchor + local — обратная
+    // совместимость сохранена.
+    let origin_x = ray.origin.x as f64 + origin.x;
     let origin_y = ray.origin.y as f64;
-    let origin_z = controller.anchor_z + ray.origin.z as f64;
+    let origin_z = ray.origin.z as f64 + origin.z;
 
     let dir_x = ray.direction.x as f64;
     let dir_y = ray.direction.y as f64;
     let dir_z = ray.direction.z as f64;
+
+    // DDA идёт по абсолютным мировым координатам блоков, а `normalize_block`
+    // работает в системе чанковой сетки (rel = abs - min_block). Пока мир не
+    // смещён (min_block_* == 0) это одно и то же; расхождение добавим здесь,
+    // когда появится offset.
+    // Нулевое направление (теоретически невозможно, viewport_to_world
+    // нормализует) зациклило бы DDA на первом вокселе — выходим явно.
+    if dir_x == 0.0 && dir_y == 0.0 && dir_z == 0.0 {
+        stats.record(Bucket::BlockInteraction, t.elapsed());
+        return;
+    }
 
     let hit = voxel_ray_cast(
         origin_x,
@@ -195,34 +225,49 @@ pub fn block_interaction_system(
         ));
     }
 
-    // R — поставить камень сверху над блоком, в который смотрим.
+    // R — поставить камень в соседнюю клетку по грани попадания. Цель:
+    // hit - entry_step * unit_axis(entry_axis), т.е. клетка, из которой луч
+    // вошёл в hit-воксель. Ось и шаг фиксируются внутри DDA (Amanatides-Woo)
+    // и возвращаются в VoxelHit. Y вне [0..CHUNK_HEIGHT) отсекает
+    // normalize_block ниже.
     if place_pressed {
-        let place_ly = hit.ly + 1;
+        let (px, py, pz) = match hit.entry_axis {
+            0 => (hit.wx - hit.entry_step, hit.wy, hit.wz),
+            1 => (hit.wx, hit.wy - hit.entry_step, hit.wz),
+            _ => (hit.wx, hit.wy, hit.wz - hit.entry_step),
+        };
 
-        // Вертикальных чанков пока нет, выше потолка ставить некуда.
-        if place_ly >= CHUNK_HEIGHT {
+        // Сосед-цель нормализуем полностью (чанк + локальные координаты) и
+        // берём слот по новому чанку: при переходе через край тора hit и цель
+        // лежат в разных чанках, а на стыке окна slot из хита мог бы указать
+        // на уже вытесненный/другой слот.
+        let Some((cx, cz, lx, ly, lz)) = read_window.topology.normalize_block(px, py, pz) else {
             stats.record(Bucket::BlockInteraction, t.elapsed());
             return;
-        }
+        };
 
-        let place_cell_index = (hit.lz * CHUNK_SIDE + hit.lx) * CHUNK_HEIGHT + place_ly;
+        let Some(slot) = read_window.slot_for_chunk(cx, cz) else {
+            stats.record(Bucket::BlockInteraction, t.elapsed());
+            return;
+        };
+
+        let generation = read_window.generation(slot);
+        // Layout чанка y-major: index = (z * CHUNK_SIDE + x) * CHUNK_HEIGHT + y.
+        let cell_index = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
 
         // Ставим только в воздух.
-        if read_world.0.get(hit.slot, place_cell_index).material_id != ids::AIR {
-            stats.record(Bucket::BlockInteraction, t.elapsed());
-            return;
+        if read_world.0.get(slot, cell_index).material_id == ids::AIR {
+            let mut cell = Cell::zeroed();
+            cell.material_id = ids::STONE;
+            //cell.phase_state = phases::SOLID;
+
+            events.push(CellEvent::set_cell_expected(
+                slot,
+                cell_index,
+                cell,
+                generation,
+            ));
         }
-
-        let mut cell = Cell::zeroed();
-        cell.material_id = ids::STONE;
-        //cell.phase_state = phases::SOLID;
-
-        events.push(CellEvent::set_cell_expected(
-            hit.slot,
-            place_cell_index,
-            cell,
-            generation,
-        ));
     }
 
     stats.record(Bucket::BlockInteraction, t.elapsed());
@@ -344,6 +389,13 @@ fn voxel_ray_cast(
 
     let mut t = 0.0_f64;
 
+    // Ось и шаг, по которых луч вошёл в текущий воксель (для соседа-цели при
+    // установке). Для стартового вокселя (t == 0) входа как такового нет:
+    // считаем вход сверху по Y — блок ставится под стартовый воксель, если
+    // он твёрдый (обычно это voxel под камерой, случай редкий).
+    let mut entry_axis: u8 = 1;
+    let mut entry_step: i64 = -1;
+
     loop {
         if t > max_dist {
             return None;
@@ -368,6 +420,9 @@ fn voxel_ray_cast(
         // Внутри мира — проверяем воксель.
         else {
             if let Some(hit) = check_voxel(vx, vy, vz, read_world, read_window) {
+                let mut hit = hit;
+                hit.entry_axis = entry_axis;
+                hit.entry_step = entry_step;
                 return Some(hit);
             }
         }
@@ -377,14 +432,20 @@ fn voxel_ray_cast(
             t = t_max_x;
             vx += step_x;
             t_max_x += t_delta_x;
+            entry_axis = 0;
+            entry_step = step_x;
         } else if t_max_y <= t_max_x && t_max_y <= t_max_z {
             t = t_max_y;
             vy += step_y;
             t_max_y += t_delta_y;
+            entry_axis = 1;
+            entry_step = step_y;
         } else {
             t = t_max_z;
             vz += step_z;
             t_max_z += t_delta_z;
+            entry_axis = 2;
+            entry_step = step_z;
         }
     }
 }
@@ -428,6 +489,12 @@ fn check_voxel(
         ly,
         lz,
         cell_index,
+        wx,
+        wy,
+        wz,
+        // Заполняется вызывающим DDA (voxel_ray_cast) по последней пройденной оси.
+        entry_axis: 1,
+        entry_step: -1,
     })
 }
 

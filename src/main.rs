@@ -45,7 +45,7 @@ fn main() {
             bevy::render::diagnostic::RenderDiagnosticsPlugin,
         ))
         .add_plugins(TorxelPlugin {
-            topology: TorusTopology::new(60, 60),
+            topology: TorusTopology::new(128, 128),
             world_path: std::path::PathBuf::from("world.bin"),
         })
         .add_systems(Startup, setup_camera)

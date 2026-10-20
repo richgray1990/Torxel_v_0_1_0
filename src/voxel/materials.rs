@@ -41,17 +41,55 @@ pub fn get_material(id: u8) -> Option<&'static Material> {
     MATERIALS.iter().find(|m| m.id == id)
 }
 
-#[inline]
-pub fn material_color(id: u8) -> [u8; 3] {
-    get_material(id).map(|m| m.color).unwrap_or([0, 0, 0])
+/// LUT свойств материала по `id` (256 записей, строится в рантайме один раз).
+///
+/// Горячий цикл мешера вызывает `is_transparent` на каждую грань и читает
+/// цвет/Air на каждый непустой блок; прежний линейный поиск по `MATERIALS`
+/// здесь — чистый waste. Семантика совпадает с функциями выше:
+/// - неизвестный id → прозрачный, цвет `[0,0,0]`, не Air;
+/// - запись заполняется из `MATERIALS` по индексу `m.id`.
+pub struct MatLut {
+    pub transparent: [bool; 256],
+    pub air: [bool; 256],
+    /// id зарегистрирован в реестре (есть запись в MATERIALS). Незарегистрированные
+    /// id мешер пропускает — прежняя семантика `get_material(..) => None => continue`.
+    pub known: [bool; 256],
+    pub color: [[u8; 3]; 256],
+    pub opacity: [f32; 256],
 }
+
+static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
+    let mut lut = MatLut {
+        transparent: [true; 256],
+        air: [false; 256],
+        known: [false; 256],
+        color: [[0, 0, 0]; 256],
+        opacity: [0.0; 256],
+    };
+    for m in MATERIALS {
+        let i = m.id as usize;
+        lut.known[i] = true;
+        lut.transparent[i] = m.opacity < 1.0;
+        lut.air[i] = m.id == ids::AIR;
+        lut.color[i] = m.color;
+        lut.opacity[i] = m.opacity;
+    }
+    lut
+});
 
 #[inline]
 pub fn is_transparent(id: u8) -> bool {
-    get_material(id).map(|m| m.opacity < 1.0).unwrap_or(true)
+    MAT_LUT.transparent[id as usize]
 }
 
 #[inline]
 pub fn is_air(id: u8) -> bool {
     id == ids::AIR
+}
+
+/// Прямой доступ к LUT для горячего цикла мешера (без повторного индексирования
+/// статического массива на каждое обращение).
+#[inline]
+pub fn mat_lut() -> &'static MatLut {
+    &MAT_LUT
 }
