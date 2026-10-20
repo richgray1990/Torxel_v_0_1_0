@@ -8,6 +8,8 @@ pub mod ids {
     pub const GRASS: u8 = 4;
     pub const WATER: u8 = 5;
     pub const CLAY: u8 = 6;
+    pub const GLASS: u8 = 7;
+    pub const BLOOM: u8 = 8;
 }
 
 pub mod phases {
@@ -24,16 +26,20 @@ pub struct Material {
     pub color: [u8; 3],
     pub opacity: f32,
     pub phase: u8,
+    pub bloom: u8,  //bloom multiplier, 1.0 - regular (no bloom), 255 - max bloom (pbr 1024?)
+    pub cutoff: bool,   //cutoff material
 }
 
 pub const MATERIALS: &[Material] = &[
-    Material { id: ids::AIR, name: "Air", color: [0, 0, 0], opacity: 0.0, phase: phases::GAS },
-    Material { id: ids::BEDROCK, name: "Bedrock", color: [30, 130, 130], opacity: 1.0, phase: phases::SOLID },
-    Material { id: ids::STONE, name: "Stone", color: [168, 168, 168], opacity: 1.0, phase: phases::SOLID },
-    Material { id: ids::DIRT, name: "Dirt", color: [139, 90, 43], opacity: 1.0, phase: phases::SOLID },
-    Material { id: ids::GRASS, name: "Grass", color: [34, 139, 34], opacity: 1.0, phase: phases::SOLID },
-    Material { id: ids::WATER, name: "Water", color: [30, 100, 200], opacity: 0.7, phase: phases::LIQUID },
-    Material { id: ids::CLAY, name: "Clay", color: [180, 130, 100], opacity: 1.0, phase: phases::SOLID },
+    Material { id: ids::AIR, name: "Air", color: [0, 0, 0], opacity: 0.0, phase: phases::GAS, bloom: 1, cutoff: false},
+    Material { id: ids::BEDROCK, name: "Bedrock", color: [30, 130, 130], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: false},
+    Material { id: ids::STONE, name: "Stone", color: [168, 168, 168], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: false},
+    Material { id: ids::DIRT, name: "Dirt", color: [139, 90, 43], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: false},
+    Material { id: ids::GRASS, name: "Grass", color: [34, 139, 34], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: true},
+    Material { id: ids::WATER, name: "Water", color: [30, 100, 200], opacity: 0.7, phase: phases::LIQUID, bloom: 1, cutoff: false},
+    Material { id: ids::CLAY, name: "Clay", color: [180, 130, 100], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: false},
+    Material { id: ids::GLASS, name: "Glass", color: [220, 220, 220], opacity: 0.5, phase: phases::SOLID, bloom: 1, cutoff: false},
+    Material { id: ids::BLOOM, name: "Bloom", color: [255, 255, 255], opacity: 0.5, phase: phases::SOLID, bloom: 50, cutoff: false},
 ];
 
 #[inline]
@@ -56,6 +62,8 @@ pub struct MatLut {
     pub known: [bool; 256],
     pub color: [[u8; 3]; 256],
     pub opacity: [f32; 256],
+    pub bloom: [u8; 256],
+    pub cutoff: [bool; 256],
 }
 
 static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
@@ -65,6 +73,8 @@ static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
         known: [false; 256],
         color: [[0, 0, 0]; 256],
         opacity: [0.0; 256],
+        bloom: [0; 256],
+        cutoff: [false; 256],
     };
     for m in MATERIALS {
         let i = m.id as usize;
@@ -73,6 +83,8 @@ static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
         lut.air[i] = m.id == ids::AIR;
         lut.color[i] = m.color;
         lut.opacity[i] = m.opacity;
+        lut.bloom[i] = m.bloom;
+        lut.cutoff[i] = m.cutoff;
     }
     lut
 });
