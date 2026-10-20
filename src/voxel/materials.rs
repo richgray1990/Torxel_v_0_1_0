@@ -9,7 +9,7 @@ pub mod ids {
     pub const WATER: u8 = 5;
     pub const CLAY: u8 = 6;
     pub const GLASS: u8 = 7;
-    pub const BLOOM: u8 = 8;
+    pub const GLOWSTONE: u8 = 8;
 }
 
 pub mod phases {
@@ -39,7 +39,7 @@ pub const MATERIALS: &[Material] = &[
     Material { id: ids::WATER, name: "Water", color: [30, 100, 200], opacity: 0.7, phase: phases::LIQUID, bloom: 1, cutoff: false},
     Material { id: ids::CLAY, name: "Clay", color: [180, 130, 100], opacity: 1.0, phase: phases::SOLID, bloom: 1, cutoff: false},
     Material { id: ids::GLASS, name: "Glass", color: [220, 220, 220], opacity: 0.5, phase: phases::SOLID, bloom: 1, cutoff: false},
-    Material { id: ids::BLOOM, name: "Bloom", color: [255, 255, 255], opacity: 0.5, phase: phases::SOLID, bloom: 50, cutoff: false},
+    Material { id: ids::GLOWSTONE, name: "Glowstone", color: [255, 255, 255], opacity: 0.5, phase: phases::SOLID, bloom: 50, cutoff: false},
 ];
 
 #[inline]
