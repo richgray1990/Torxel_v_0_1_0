@@ -3,11 +3,11 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::{
-    CHUNK_HEIGHT, CHUNK_SIDE, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE,
+    CHUNK_HEIGHT, CHUNK_SIDE, MATERIAL_OUT_OF_WORLD, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE,
     SUBCHUNKS_X, SUBCHUNKS_Y,
 };
 use crate::voxel::height_map::column_index;
-use crate::voxel::materials::{mat_lut, MatLut, ids};
+use crate::voxel::materials::{ids, mat_lut, MatLut};
 use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
@@ -97,8 +97,9 @@ pub const HALO_HEIGHT: usize = SUBCHUNK_HEIGHT + 2;
 pub const HALO_CELLS: usize = HALO_SIDE * HALO_SIDE * HALO_HEIGHT;
 
 /// Сентинел «непроницаемо»: под `y = 0` грани не рисуются, поэтому сосед должен
-/// считаться непрозрачным. `is_transparent` для неизвестного id вернёт `true`,
-/// поэтому нужен именно существующий непрозрачный материал.
+/// считаться непрозрачным. В новой таблице `face_visible` незарегистрированный
+/// id тоже даёт непрозрачного соседа (`transparent[nb] == false`), но BEDROCK
+/// остаётся явным и не зависит от состояния LUT — безопаснее как сентинел.
 const HALO_OPAQUE: u8 = ids::BEDROCK;
 
 /// Материалы субчанка вместе с одноблочным кольцом соседей по всем шести граням.
@@ -107,6 +108,12 @@ const HALO_OPAQUE: u8 = ids::BEDROCK;
 /// без ветвлений, обращений к чужим слотам пула и тороидальных нормализаций.
 /// Хранит только `material_id` — цвет/AO соседа мешеру не нужны, а 18³×Cell
 /// стоили бы 93 КБ вместо 5.7 КБ.
+///
+/// Начальное содержимое — `MATERIAL_OUT_OF_WORLD`: незарегистрированный id,
+/// который LUT считает непрозрачным (`known[id] == false`, `transparent[id]`
+/// остаётся `false`). Это важно для столбцов за пределами активного окна:
+/// `fill_halo` их не трогает, и они должны вести себя как «сплошной сосед»,
+/// иначе у края окна мешер рисовал стены из воздуха («лоскуты»).
 pub struct HaloBuf {
     cells: [u8; HALO_CELLS],
 }
@@ -144,7 +151,6 @@ pub fn build_subchunk_mesh(
     halo: &mut HaloBuf,
     subchunk_index: usize,
     pool: &ChunkPool,
-    //slot: usize,
     chunk_x: i64,
     chunk_z: i64,
     slot: usize,
@@ -162,10 +168,10 @@ pub fn build_subchunk_mesh(
 
     let fill_elapsed = if PERF_ENABLED {
         let t = std::time::Instant::now();
-        fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(halo, pool, slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
         t.elapsed()
     } else {
-        fill_halo(halo, pool, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(halo, pool, slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
         std::time::Duration::ZERO
     };
 
@@ -213,12 +219,16 @@ pub fn build_subchunk_mesh(
                 let color = lut.color[material_id];
                 let a = lut.opacity[material_id];
 
+                // id текущего блока — левый индекс таблицы видимости граней.
+                let cur_id = material_id as u8;
+
                 for (face_idx, (dx, dy, dz)) in FACES.iter().enumerate() {
                     let nbx = (hx as i64 + dx) as usize;
                     let nby = (hy as i64 + dy) as usize;
                     let nbz = (hz as i64 + dz) as usize;
 
-                    let visible = is_face_visible(lut, halo, nbx, nby, nbz);
+                    let nb_id = halo.get(nbx, nby, nbz);
+                    let visible = lut.face_visible[cur_id as usize][nb_id as usize];
 
                     if visible {
                         let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.15;
@@ -264,12 +274,13 @@ pub fn build_subchunk_mesh(
 /// (слота нет → воздух), кольцо по Y — из соседних субчанков того же слота
 /// (`SUBCHUNKS_X = SUBCHUNKS_Z = 1`, поэтому горизонтальные координаты субчанка
 /// совпадают с чанковыми). Ниже `y = 0` соседа нет — ставим непрозрачный сентинел,
-/// выше `CHUNK_HEIGHT` — воздух. Семантика совпадает с прежней `is_face_visible`.
+/// выше `CHUNK_HEIGHT` — воздух. Видимость граней решается таблицей
+/// `MatLut::face_visible` в горячем цикле мешера (см. `materials.rs`).
 #[allow(clippy::too_many_arguments)]
 fn fill_halo(
     halo: &mut HaloBuf,
     pool: &ChunkPool,
-    //slot: usize,
+    slot: usize,
     chunk_x: i64,
     chunk_z: i64,
     sub_x: usize,
@@ -285,6 +296,9 @@ fn fill_halo(
             neighbor_slots[(dx + dz * 3) as usize] = window.slot_for_chunk(ncx, ncz);
         }
     }
+
+    // Карта высот текущего чанка — пропуск пустого неба в кольце dx == 0.
+    let tops = window.height_map.column_slice(slot);
 
     // Прежний обход писал все 5832 байта halo поэлементно и столько же раз
     // читал пул колонками с шагом `size_of::<Cell>()` (прыжки через 512
@@ -306,17 +320,27 @@ fn fill_halo(
         let dz = world_z.div_euclid(CHUNK_SIDE as isize);
         let local_z = world_z.rem_euclid(CHUNK_SIDE as isize) as usize;
 
-        // Для каждого hx ∈ 0..18: слот чанка (dx,dz) и индекс колонки внутри
-        // него. Совпадают с прежними выражениями, просто вынесены из hy-цикла.
+        // Для каждого hx ∈ 0..18: слот чанка (dx,dz), индекс колонки внутри
+        // него и верх непустой колонки. Совпадают с прежними выражениями для
+        // источника, просто вынесены из hy-цикла.
         let mut col_of: [usize; HALO_SIDE] = [0; HALO_SIDE];
         let mut slot_of: [Option<usize>; HALO_SIDE] = [None; HALO_SIDE];
+        let mut top_of: [usize; HALO_SIDE] = [CHUNK_HEIGHT; HALO_SIDE];
         for hx in 0..HALO_SIDE {
             let world_x = (sub_x + hx) as isize - 1;
             let dx = world_x.div_euclid(CHUNK_SIDE as isize);
             let local_x = world_x.rem_euclid(CHUNK_SIDE as isize) as usize;
             // `dx`/`dz` ∈ {-1, 0, 1}; +1 приводит их к тем же 0..3, что и в таблице выше.
-            slot_of[hx] = neighbor_slots[((dx + 1) + (dz + 1) * 3) as usize];
+            let ns = neighbor_slots[((dx + 1) + (dz + 1) * 3) as usize];
+            slot_of[hx] = ns;
             col_of[hx] = local_z * CHUNK_SIDE + local_x;
+            // Верх колонки известен только для текущего чанка (`dx == 0`) — у
+            // соседей свои карты высот, а halo-столбцы соседей тонкие (18 ячеек),
+            // экономия на них не оправдывает чтения чужих карт. `column_tops`
+            // хранит `y_top + 1`: при `y >= top` блока нет по определению.
+            if dx == 0 {
+                top_of[hx] = tops[col_of[hx]] as usize;
+            }
         }
 
         for hy in 0..HALO_HEIGHT {
@@ -339,6 +363,15 @@ fn fill_halo(
             for hx in 0..HALO_SIDE {
                 row[hx] = match slot_of[hx] {
                     Some(s) => pool.get(s, col_of[hx] * CHUNK_HEIGHT + y).material_id,
+                    //  Some(s) => {
+                    //      // Пропуск пустого неба: блок выше вершины колонки не
+                    //      // может существовать, читаем пул только до `top`.
+                    //      if y >= top_of[hx] {
+                    //          ids::AIR
+                    //      } else {
+                    //          pool.get(s, col_of[hx] * CHUNK_HEIGHT + y).material_id
+                    //      }
+                    //  },
                     // Слота соседа нет — это край активного окна. Считаем его
                     // сплошным (`HALO_OPAQUE`), чтобы на границе окна не строились
                     // стены: за краем всё равно ничего не видно, а пересборка при
@@ -353,9 +386,4 @@ fn fill_halo(
             }
         }
     }
-}
-
-#[inline(always)]
-fn is_face_visible(lut: &MatLut, halo: &HaloBuf, hx: usize, hy: usize, hz: usize) -> bool {
-    lut.transparent[halo.get(hx, hy, hz) as usize]
 }

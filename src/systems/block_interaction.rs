@@ -389,12 +389,43 @@ fn voxel_ray_cast(
 
     let mut t = 0.0_f64;
 
-    // Ось и шаг, по которых луч вошёл в текущий воксель (для соседа-цели при
-    // установке). Для стартового вокселя (t == 0) входа как такового нет:
-    // считаем вход сверху по Y — блок ставится под стартовый воксель, если
-    // он твёрдый (обычно это voxel под камерой, случай редкий).
-    let mut entry_axis: u8 = 1;
-    let mut entry_step: i64 = -1;
+    // ── Amanatides–Woo с корректным лицом входа ──────────────────────────
+    // Стартовый воксель может лежать ВНУТРИ блока (камера в геометрии, либо
+    // начало луча `ray.origin + origin` дало floor() внутрь блока). Тогда
+    // лицо входа — не «предыдущая пройденная ось», а граница ячейки, которую
+    // луч пересечёт БЛИЖАЙШЕЙ; сосед-цель для установки = воксель за этой
+    // границей. Прежняя заглушка (вход сверху по Y) ставила блок на 1..N
+    // ячеек мимо цели — тем сильнее, чем глубже камера в толще.
+    //
+    // `t_enter` — расстояние до первой границы из текущей ячейки по каждой оси
+    // (f64::INFINITY, если движения по оси нет), `axis_at_*` — ось шага.
+    let frac_x = ox - vx as f64; // ∈ [0,1)
+    let frac_y = oy - vy as f64;
+    let frac_z = oz - vz as f64;
+
+    let t_enter_x = if step_x > 0 { (1.0 - frac_x) * t_delta_x }
+                   else if step_x < 0 { frac_x * t_delta_x }
+                   else { f64::INFINITY };
+    let t_enter_y = if step_y > 0 { (1.0 - frac_y) * t_delta_y }
+                   else if step_y < 0 { frac_y * t_delta_y }
+                   else { f64::INFINITY };
+    let t_enter_z = if step_z > 0 { (1.0 - frac_z) * t_delta_z }
+                   else if step_z < 0 { frac_z * t_delta_z }
+                   else { f64::INFINITY };
+
+    // Лицо входа стартового вокселя (используется только если он сразу hit).
+    let (mut entry_axis, mut entry_step) = if t_enter_x <= t_enter_y && t_enter_x <= t_enter_z {
+        (0u8, step_x)
+    } else if t_enter_y <= t_enter_z {
+        (1u8, step_y)
+    } else {
+        (2u8, step_z)
+    };
+    // По бездвижной оси step = 0 — фолбэк «вход сверху», как раньше.
+    if entry_step == 0 {
+        entry_axis = 1;
+        entry_step = -1;
+    }
 
     loop {
         if t > max_dist {
@@ -427,7 +458,7 @@ fn voxel_ray_cast(
             }
         }
 
-        // Идём к следующему вокселю.
+        // Идём к следующему вокселю; войдём в него через ту же грань.
         if t_max_x <= t_max_y && t_max_x <= t_max_z {
             t = t_max_x;
             vx += step_x;
