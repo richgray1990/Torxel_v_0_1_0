@@ -13,7 +13,7 @@ pub struct ChunkEntityPool {
 }
 
 impl ChunkEntityPool {
-    pub const POOL_SIZE: usize = 512; // Достаточно для окна 16×16 + запас
+    pub const POOL_SIZE: usize = 2048; // Достаточно для окна 16×16 + запас
     
     /// Взять свободную сущность из пула
     pub fn acquire(&mut self) -> Option<usize> {
