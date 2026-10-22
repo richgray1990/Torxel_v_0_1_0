@@ -1,27 +1,20 @@
 //! Генератор мира для Torxel с использованием 4D FBM шума для бесшовной тороидальной топологии.
 //!
 //! Использование:
-//! ```bash
-//! cargo run --release --bin generate_world -- 50 60 world.bin
-//! ```
-
-use std::time::Instant;
+//! bash //! cargo run --release --bin generate_world -- 50 60 world.bin //!
+use bytemuck::Zeroable;
+use noise::{Fbm, NoiseFn, OpenSimplex};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-
-use bytemuck::Zeroable;
-use noise::{Fbm, OpenSimplex, NoiseFn};
-
-use torxel::voxel::format::{Cell, CHUNK_HEIGHT, CHUNK_SIDE, CELLS_PER_CHUNK};
-use torxel::voxel::height_map::column_tops;
-use torxel::voxel::materials::ids::{AIR, BEDROCK, STONE, GRASS, WATER, CLAY};
+use std::time::Instant;
 use torxel::io::file_format::{ChunkHeader, WorldHeader};
-
+use torxel::voxel::format::{CELLS_PER_CHUNK, CHUNK_HEIGHT, CHUNK_SIDE, Cell};
+use torxel::voxel::height_map::column_tops;
+use torxel::voxel::materials::ids::{AIR, BEDROCK, CLAY, GRASS, STONE, WATER};
 // ═══════════════════════════════════════════════════════════
 // Константы генерации (каскад карт высот, всё на шумах)
 // ═══════════════════════════════════════════════════════════
-
 /// Уровень моря для воды (заполняет AIR ниже этой отметки)
 const SEA_LEVEL: usize = 30;
 /// Верхняя граница слоя каньонов (низменья с distance-map вырезанием)
@@ -34,7 +27,6 @@ const MOUNTAIN_MIN: usize = 64;
 const SPIKE_LERP_MAX: usize = 800;
 /// Верхняя граница пика в блоках (после lerp до 800 и обрезки).
 const SPIKE_MAX: usize = 512;
-
 /// Масштаб шума для 4D-отображения (общий базовый радиус в 4D-торе)
 const NOISE_SCALE: f64 = 1.5;
 /// Количество октав для FBM (детализация: 3-6 оптимально)
@@ -43,41 +35,34 @@ const FBM_OCTAVES: usize = 4;
 const FBM_PERSISTENCE: f64 = 0.5;
 /// Частота октав (масштаб каждой следующей)
 const FBM_LACUNARITY: f64 = 2.0;
-
 /// Множители масштаба шума для отдельных карт (умножают NOISE_SCALE):
 /// большие мягкие формы — мелкие масштабы, резкие детали — крупные.
-const HILLS_FREQ: f64 = 0.7;   // слабохолмистый фундамент (1..10)
-const BASE_FREQ: f64 = 1.0;    // низменья под каньонами
-const CANYON_FREQ: f64 = 2.2;  // ridged-шум для каньонов (тонные линии разлома)
-const MOUNT_FREQ: f64 = 1.6;   // горы (до 384)
-const SPIKE_FREQ: f64 = 6.0;   // пики: очень редкие, высокие, тонкие
-const SPRAY_FREQ: f64 = 9.0;   // ВЧ-карта прореживания травы (spray)
-const BIOME_FREQ: f64 = 1.1;   // НЧ-карта «плодородия» для пятен травы
-
+const HILLS_FREQ: f64 = 0.7; // слабохолмистый фундамент (1..10)
+const BASE_FREQ: f64 = 1.0; // низменья под каньонами
+const CANYON_FREQ: f64 = 2.2; // ridged-шум для каньонов (тонные линии разлома)
+const MOUNT_FREQ: f64 = 1.6; // горы (до 384)
+const SPIKE_FREQ: f64 = 6.0; // пики: очень редкие, высокие, тонкие
+const SPRAY_FREQ: f64 = 9.0; // ВЧ-карта прореживания травы (spray)
+const BIOME_FREQ: f64 = 1.1; // НЧ-карта «плодородия» для пятен травы
 /// Амплитуды слоёв каскада (в блоках по высоте)
-const HILLS_AMP: usize = 9;    // холмы: y ∈ [1, 10]
-const BASE_AMP: usize = 46;    // низменья: y ∈ [CANYON_TOP - BASE_AMP, CANYON_TOP]
-
+const HILLS_AMP: usize = 9; // холмы: y ∈ [1, 10]
+const BASE_AMP: usize = 46; // низменья: y ∈ [CANYON_TOP - BASE_AMP, CANYON_TOP]
 /// Порог ridged-маски каньонов: чем ближе шум к 1, тем глубже вырез
 const CANYON_THRESHOLD: f64 = 0.62;
 /// Глубина выреза каньона (максимум, в блоках)
 const CANYON_DEPTH: usize = 40;
-
 /// Доля от фактического максимума карты, после которой начинается «ядро» горы.
-/// Выше `MOUNT_GATE * max` нормализованный профиль растёт к вершине горы.
+/// Выше MOUNT_GATE * max нормализованный профиль растёт к вершине горы.
 const MOUNT_GATE: f64 = 0.80;
 /// То же для пиков: ядро должно быть крошечным (1-2 башни на мир).
 const SPIKE_GATE: f64 = 0.93;
-
 /// Трава: диапазон высот + параметры прореживания
-const GRASS_MIN_Y: usize = 12;   // ниже — берег/вода, травы нет
-const GRASS_MAX_Y: usize = 200;  // выше — голый камень
+const GRASS_MIN_Y: usize = 12; // ниже — берег/вода, травы нет
+const GRASS_MAX_Y: usize = 200; // выше — голый камень
 const GRASS_BIOME_GATE: f64 = 0.55; // порог плодородия (НЧ-карта)
 const GRASS_SPRAY_GATE: f64 = 0.60; // порог точечного распыления (ВЧ-карта)
-
 /// Береговой пояс: clay вокруг мелководья (в пределах этого дельты уровня воды)
 const SHORE_BAND: usize = 3;
-
 fn main() {
     let start_total = Instant::now();
     let args: Vec<String> = std::env::args().collect();
@@ -110,7 +95,9 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
 
     header.with_world_seed(world_seed);
 
-    writer.write_all(bytemuck::bytes_of(&header)).expect("Failed to write header");
+    writer
+        .write_all(bytemuck::bytes_of(&header))
+        .expect("Failed to write header");
 
     // Инициализация генератора шума: отдельный FBM на каждую карту,
     // со своим seed (смещаем базовый seed) — карты статистически независимы.
@@ -131,7 +118,7 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
     let world_depth = (chunks_z as usize) * CHUNK_SIDE;
     let two_pi = std::f64::consts::PI * 2.0;
 
-    // ── Подбор карт гор и пиков (твоя схема: новая карта → проверка → ещё) ──
+    // ── Подбор карт гор и пиков (схема: новая карта → проверка → ещё) ──
     // Профиль нормализуем по фактическому максимуму шума, поэтому «дотянет ли»
     // гора до потолка зависит только от редкости максимума: считаем глобальный
     // профиль высот один раз, находим экстремумы и выбираем первую карту,
@@ -147,7 +134,10 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
                     for lx in 0..CHUNK_SIDE {
                         let gx = (cx as i64 * CHUNK_SIDE as i64 + lx as i64) as f64;
                         let gz = (cz as i64 * CHUNK_SIDE as i64 + lz as i64) as f64;
-                        let n = noise01(fbm, torus_point(gx, gz, world_width, world_depth, two_pi, scale));
+                        let n = noise01(
+                            fbm,
+                            torus_point(gx, gz, world_width, world_depth, two_pi, scale),
+                        );
                         if n > max_n {
                             max_n = n;
                         }
@@ -163,7 +153,10 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
                     for lx in 0..CHUNK_SIDE {
                         let gx = (cx as i64 * CHUNK_SIDE as i64 + lx as i64) as f64;
                         let gz = (cz as i64 * CHUNK_SIDE as i64 + lz as i64) as f64;
-                        let n = noise01(fbm, torus_point(gx, gz, world_width, world_depth, two_pi, scale));
+                        let n = noise01(
+                            fbm,
+                            torus_point(gx, gz, world_width, world_depth, two_pi, scale),
+                        );
                         if n >= thr {
                             above += 1;
                         }
@@ -228,8 +221,12 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
                 (&biome_fbm, biome_s),
             );
 
-            writer.write_all(bytemuck::bytes_of(&chunk_header)).expect("Failed to write chunk header");
-            writer.write_all(bytemuck::cast_slice(&chunk_data)).expect("Failed to write chunk data");
+            writer
+                .write_all(bytemuck::bytes_of(&chunk_header))
+                .expect("Failed to write chunk header");
+            writer
+                .write_all(bytemuck::cast_slice(&chunk_data))
+                .expect("Failed to write chunk data");
         }
     }
 
@@ -254,19 +251,16 @@ fn torus_point(gx: f64, gz: f64, w: usize, d: usize, two_pi: f64, scale: f64) ->
         v.sin() * scale,
     ]
 }
-
 /// FBM → нормализация в [0,1].
 #[inline]
 fn noise01(fbm: &Fbm<OpenSimplex>, p: [f64; 4]) -> f64 {
     (fbm.get(p) + 1.0) / 2.0
 }
-
 /// Ridged-шум: 1 - |n| → гребни (тонкие линии разлома для каньонов).
 #[inline]
 fn ridged(fbm: &Fbm<OpenSimplex>, p: [f64; 4]) -> f64 {
     1.0 - fbm.get(p).abs()
 }
-
 fn generate_chunk(
     chunk_x: i64,
     chunk_z: i64,
@@ -297,13 +291,22 @@ fn generate_chunk(
             // ── Каскад карт высот (всё на шумах, никаких кругов) ──────────
 
             // 1. Слабохолмистый фундамент: y ∈ [1, 10], stone.
-            let hills_n = noise01(hills.0, torus_point(gx, gz, world_width, world_depth, two_pi, hills.1));
+            let hills_n = noise01(
+                hills.0,
+                torus_point(gx, gz, world_width, world_depth, two_pi, hills.1),
+            );
             let foundation = 1 + (hills_n * HILLS_AMP as f64) as usize; // 1..=10
 
             // 2. Низменья до CANYON_TOP=64 + вырез каньонами (ridged-маска).
-            let base_n = noise01(base.0, torus_point(gx, gz, world_width, world_depth, two_pi, base.1));
+            let base_n = noise01(
+                base.0,
+                torus_point(gx, gz, world_width, world_depth, two_pi, base.1),
+            );
             let lowlands = (CANYON_TOP - BASE_AMP) + (base_n * BASE_AMP as f64) as usize; // 18..=64
-            let ridge = ridged(canyon.0, torus_point(gx, gz, world_width, world_depth, two_pi, canyon.1));
+            let ridge = ridged(
+                canyon.0,
+                torus_point(gx, gz, world_width, world_depth, two_pi, canyon.1),
+            );
             let canyon_cut = if ridge > CANYON_THRESHOLD {
                 // квадратичный спад глубины от краёв к оси разлома
                 let t = (ridge - CANYON_THRESHOLD) / (1.0 - CANYON_THRESHOLD);
@@ -319,11 +322,15 @@ fn generate_chunk(
             //    глобальному максимуму гарантирует: самая высокая гора мира после
             //    масштабирования достанет ровно до `MOUNTAIN_MAX`.
             let (mount_fbm, mount_s, mount_max) = mount;
-            let m_n = noise01(mount_fbm, torus_point(gx, gz, world_width, world_depth, two_pi, mount_s));
+            let m_n = noise01(
+                mount_fbm,
+                torus_point(gx, gz, world_width, world_depth, two_pi, mount_s),
+            );
             let m_thr = mount_max * MOUNT_GATE;
             if m_n > m_thr {
                 let t = ((m_n - m_thr) / (mount_max - m_thr)).clamp(0.0, 1.0);
-                let mountain_h = MOUNTAIN_MIN + (t.powi(3) * (MOUNTAIN_MAX - MOUNTAIN_MIN) as f64) as usize;
+                let mountain_h =
+                    MOUNTAIN_MIN + (t.powi(3) * (MOUNTAIN_MAX - MOUNTAIN_MIN) as f64) as usize;
                 if mountain_h > surface {
                     surface = mountain_h.max(foundation + 1);
                 }
@@ -336,7 +343,10 @@ fn generate_chunk(
             //    все субчанки чанка задействованы (проверка швов). Остальные
             //    пики ниже — естественный разброс от формы шума.
             let (spike_fbm, spike_s, spike_max) = spike;
-            let s_n = noise01(spike_fbm, torus_point(gx, gz, world_width, world_depth, two_pi, spike_s));
+            let s_n = noise01(
+                spike_fbm,
+                torus_point(gx, gz, world_width, world_depth, two_pi, spike_s),
+            );
             let s_thr = spike_max * SPIKE_GATE;
             if s_n > s_thr {
                 let t = ((s_n - s_thr) / (spike_max - s_thr)).clamp(0.0, 1.0);
@@ -350,12 +360,18 @@ fn generate_chunk(
             let surface = surface.min(CHUNK_HEIGHT - 1);
 
             // Трава: НЧ-пятно плодородия × ВЧ-spray прореживание + диапазон высот.
-            let fert = noise01(biome.0, torus_point(gx, gz, world_width, world_depth, two_pi, biome.1));
-            let sp = noise01(spray.0, torus_point(gx, gz, world_width, world_depth, two_pi, spray.1));
+            let fert = noise01(
+                biome.0,
+                torus_point(gx, gz, world_width, world_depth, two_pi, biome.1),
+            );
+            let sp = noise01(
+                spray.0,
+                torus_point(gx, gz, world_width, world_depth, two_pi, spray.1),
+            );
             let grass_ok = fert > GRASS_BIOME_GATE && sp > GRASS_SPRAY_GATE;
 
-            // Заполняем колонку.
-            for ly in 0..CHUNK_HEIGHT-1 {
+            // Заполняем колонку: полный диапазон индексов `0..CHUNK_HEIGHT`.
+            for ly in 0..CHUNK_HEIGHT {
                 let cell_index = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
 
                 let mut material = if ly == 0 || ly <= foundation {
@@ -375,10 +391,7 @@ fn generate_chunk(
                         && surface <= SEA_LEVEL + SHORE_BAND
                     {
                         material = CLAY;
-                    } else if grass_ok
-                        && surface >= GRASS_MIN_Y
-                        && surface <= GRASS_MAX_Y
-                    {
+                    } else if grass_ok && surface >= GRASS_MIN_Y && surface <= GRASS_MAX_Y {
                         // Прореженная трава: пятно плодородия × spray-шум.
                         material = GRASS;
                     }
@@ -390,13 +403,21 @@ fn generate_chunk(
                     AIR => {}
                     WATER => {
                         let y = ly as u16;
-                        if y < min_liquid { min_liquid = y; }
-                        if y > max_liquid { max_liquid = y; }
+                        if y < min_liquid {
+                            min_liquid = y;
+                        }
+                        if y > max_liquid {
+                            max_liquid = y;
+                        }
                     }
                     _ => {
                         let y = ly as u16;
-                        if y < min_solid { min_solid = y; }
-                        if y > max_solid { max_solid = y; }
+                        if y < min_solid {
+                            min_solid = y;
+                        }
+                        if y > max_solid {
+                            max_solid = y;
+                        }
                     }
                 }
             }
