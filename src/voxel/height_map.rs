@@ -119,7 +119,7 @@ pub fn column_tops(cells: &[Cell]) -> [u16; COLUMNS_PER_CHUNK] {
 
     for local_z in 0..CHUNK_SIDE {
         for local_x in 0..CHUNK_SIDE {
-            for local_y in 0..CHUNK_HEIGHT {
+            for local_y in 0..(CHUNK_HEIGHT - 1) {
                 let cell = &cells[index];
                 index += 1;
 

@@ -49,7 +49,7 @@ pub fn get_material(id: u8) -> Option<&'static Material> {
 
 /// LUT свойств материала по `id` (256 записей, строится в рантайме один раз).
 ///
-/// Горячий цикл мешера читает видимость грани (`face_visible`) на каждую грань
+/// Горячий цикл мешера проверяет видимость грани (`is_face_visible`) на каждую грань
 /// и цвет/opacity на каждый непустой блок; прежний линейный поиск по `MATERIALS`
 /// здесь — чистый waste. Семантика совпадает с функциями выше:
 /// - неизвестный id → прозрачный, цвет `[0,0,0]`, не Air;
@@ -64,19 +64,6 @@ pub struct MatLut {
     pub opacity: [f32; 256],
     pub bloom: [u8; 256],
     pub cutoff: [bool; 256],
-    /// Грань блока `id` видна сквозь соседа `nb`. Строится один раз как
-    /// двумерная таблица 256×256 по согласованному правилу:
-    /// - сосед непрозрачен → грань не видна (перекрываем полностью);
-    /// - сосед того же материала → не видна (вода-вода, стекло-стекло — без
-    ///   внутренних швов и z-fighting);
-    /// - иначе и сосед прозрачен → видна (вода над воздухом, вода под стеклом).
-    ///
-    /// Таблица плоская (`[bool; 256*256]`), индекс `[current][neighbor]`, чтобы
-    /// в горячем цикле было одно индексирование вместо ветвлений. Для известных
-    /// материалов это ровно прежнее `lut.transparent[nb]`: раньше все
-    /// зарегистрированные материалы были либо opacity==1.0, либо AIR. Новое
-    /// поведение проявляется только для пар «прозрачный–прозрачный разного id».
-    pub face_visible: [[bool; 256]; 256],
 }
 
 static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
@@ -88,10 +75,6 @@ static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
         opacity: [0.0; 256],
         bloom: [0; 256],
         cutoff: [false; 256],
-        // По умолчанию для незарегистрированных пар — «грань видна» (прежняя
-        // семантика неизвестного id как прозрачного). Ниже перезаписывается для
-        // всех реально зарегистрированных id.
-        face_visible: [[true; 256]; 256],
     };
     for m in MATERIALS {
         let i = m.id as usize;
@@ -103,22 +86,22 @@ static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
         lut.bloom[i] = m.bloom;
         lut.cutoff[i] = m.cutoff;
     }
-    // Правило видимости — по всем 256×256 парам, включая незарегистрированные
-    // id (для них opacity==0.0, transparent==true из инициализации выше).
-    for cur in 0..256 {
-        for nb in 0..256 {
-            lut.face_visible[cur][nb] =
-                lut.transparent[nb] && !(cur == nb && cur != ids::AIR as usize);
-        }
-    }
     lut
 });
 
-/// Проверка видимости грани блока `current` при соседе `neighbor` — одно
-/// чтение таблицы, без ветвлений.
+/// Проверка видимости грани блока `current` при соседе `neighbor`.
+///
+/// Правило (согласованное): грань видна, если сосед прозрачен И не того же
+/// материала, что текущий блок (вода-вода / стекло-стекло — без внутренних
+/// швов и z-fighting). Реализовано двумя предсказуемыми ветвлениями над
+/// 256-байтовыми таблицами LUT вместо 64-КБ двумерной таблицы `face_visible`:
+/// та не помещалась в L1 и ловила cache miss на каждую грань.
 #[inline(always)]
-pub fn is_face_visible(current: u8, neighbor: u8) -> bool {
-    MAT_LUT.face_visible[current as usize][neighbor as usize]
+pub fn is_face_visible(lut: &MatLut, current: u8, neighbor: u8) -> bool {
+    if !lut.transparent[neighbor as usize] {
+        return false;
+    }
+    current != neighbor || current == ids::AIR
 }
 
 #[inline]

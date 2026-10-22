@@ -37,9 +37,9 @@ impl ReadSlotSnapshot {
             grid_z: -1,
             state: SlotState::Empty,
             generation: 0,
-            min_solid_y: CHUNK_HEIGHT as u16,
+            min_solid_y: (CHUNK_HEIGHT as u16) - 1,
             max_solid_y: 0,
-            min_liquid_y: CHUNK_HEIGHT as u16,
+            min_liquid_y: (CHUNK_HEIGHT as u16) - 1,
             max_liquid_y: 0,
             bounds_stale: true,
         }

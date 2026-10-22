@@ -6,8 +6,7 @@ use crate::voxel::format::{
     CHUNK_HEIGHT, CHUNK_SIDE, MATERIAL_OUT_OF_WORLD, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE,
     SUBCHUNKS_X, SUBCHUNKS_Y,
 };
-use crate::voxel::height_map::column_index;
-use crate::voxel::materials::{ids, mat_lut, MatLut};
+use crate::voxel::materials::{ids, is_face_visible, mat_lut, MatLut};
 use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
@@ -153,7 +152,7 @@ pub fn build_subchunk_mesh(
     pool: &ChunkPool,
     chunk_x: i64,
     chunk_z: i64,
-    slot: usize,
+    _slot: usize,
     window: &ReadWindowManager,
     // Под-метки для `PerfStats`: чтобы разложить пик, замер не должен требовать
     // второго прохода по граням. `None` — замер выключен (см. `PERF_ENABLED`).
@@ -168,16 +167,15 @@ pub fn build_subchunk_mesh(
 
     let fill_elapsed = if PERF_ENABLED {
         let t = std::time::Instant::now();
-        fill_halo(halo, pool, slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
         t.elapsed()
     } else {
-        fill_halo(halo, pool, slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
         std::time::Duration::ZERO
     };
 
     let t_face = if PERF_ENABLED { Some(std::time::Instant::now()) } else { None };
 
-    let tops = window.height_map.column_slice(slot);
     let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
 
     // LUT материалов: цвет/opacity/transparent — прямой доступ по id вместо
@@ -186,23 +184,11 @@ pub fn build_subchunk_mesh(
 
     for lz in sub_z..sub_z + SUBCHUNK_SIDE {
         for lx in sub_x..sub_x + SUBCHUNK_SIDE {
-            // Верхний воздушный `y` колонки: выше него блоков нет по определению
-            // карты. `0` — колонка пуста, вся пропускается.
-            let col = column_index(lx - sub_x, lz - sub_z);
-            let top_y = tops[col] as usize;
-
-            if top_y <= sub_y {
-                continue;
-            }
-
-            // Внутри полосы колонку не имеет смысла сканировать выше `top_y`.
-            let y_end = top_y.min(sub_y_end);
-
             // Локальные координаты внутри субчанка и соответствующие им +1 в halo.
             let hx = lx - sub_x + 1;
             let hz = lz - sub_z + 1;
 
-            for ly in sub_y..y_end {
+            for ly in sub_y..sub_y_end {
                 let hy = ly - sub_y + 1;
 
                 let material_id = halo.get(hx, hy, hz);
@@ -228,7 +214,7 @@ pub fn build_subchunk_mesh(
                     let nbz = (hz as i64 + dz) as usize;
 
                     let nb_id = halo.get(nbx, nby, nbz);
-                    let visible = lut.face_visible[cur_id as usize][nb_id as usize];
+                    let visible = is_face_visible(lut, cur_id, nb_id);
 
                     if visible {
                         let brightness = 1.0 - (ly as f32 / CHUNK_HEIGHT as f32) * 0.15;
@@ -275,12 +261,12 @@ pub fn build_subchunk_mesh(
 /// (`SUBCHUNKS_X = SUBCHUNKS_Z = 1`, поэтому горизонтальные координаты субчанка
 /// совпадают с чанковыми). Ниже `y = 0` соседа нет — ставим непрозрачный сентинел,
 /// выше `CHUNK_HEIGHT` — воздух. Видимость граней решается таблицей
-/// `MatLut::face_visible` в горячем цикле мешера (см. `materials.rs`).
+/// Видимость граней решается `is_face_visible` в горячем цикле мешера (см. `materials.rs`).
 #[allow(clippy::too_many_arguments)]
 fn fill_halo(
     halo: &mut HaloBuf,
     pool: &ChunkPool,
-    slot: usize,
+    _slot: usize,
     chunk_x: i64,
     chunk_z: i64,
     sub_x: usize,
@@ -297,19 +283,11 @@ fn fill_halo(
         }
     }
 
-    // Карта высот текущего чанка — пропуск пустого неба в кольце dx == 0.
-    let tops = window.height_map.column_slice(slot);
+    // Карта высот здесь не используется намеренно: `column_tops` учитывает только
+    // непустые ячейки, но пропуска чтения пула по этой карте ломали меш при
+    // жидкостях (вода выше «вершины» колонки становилась воздухом → стены под
+    // поверхностью). Обход row-major ниже сохраняет те же адреса источника.
 
-    // Прежний обход писал все 5832 байта halo поэлементно и столько же раз
-    // читал пул колонками с шагом `size_of::<Cell>()` (прыжки через 512
-    // колонок), включая области над картой высот, где блоков нет по
-    // определению. Новый обход сохраняет ровно те же адреса источника для
-    // каждой ячейки halo — `(hx, hy, hz)` отображается в тот же `pool.get(s,
-    // column_base + y)`, что и раньше, — но меняет порядок доступа на
-    // row-major: строка `(hy, hz)` читается прогоном по hx и пишется одним
-    // contiguous-слайсом. Соседние hx при фиксированных (y, hz) лежат в пуле
-    // подряд (layout `(local_z*16 + local_x)*CHUNK_HEIGHT + y`), поэтому ряд
-    // вычитается плотнее, чем прежний шаг вдоль y.
     #[inline(always)]
     const fn row_start(hy: usize, hz: usize) -> usize {
         (hz * HALO_HEIGHT + hy) * HALO_SIDE
@@ -320,12 +298,11 @@ fn fill_halo(
         let dz = world_z.div_euclid(CHUNK_SIDE as isize);
         let local_z = world_z.rem_euclid(CHUNK_SIDE as isize) as usize;
 
-        // Для каждого hx ∈ 0..18: слот чанка (dx,dz), индекс колонки внутри
-        // него и верх непустой колонки. Совпадают с прежними выражениями для
-        // источника, просто вынесены из hy-цикла.
+        // Для каждого hx ∈ 0..18: слот чанка (dx,dz) и индекс колонки внутри
+        // него. Совпадают с прежними выражениями для источника, просто вынесены
+        // из hy-цикла.
         let mut col_of: [usize; HALO_SIDE] = [0; HALO_SIDE];
         let mut slot_of: [Option<usize>; HALO_SIDE] = [None; HALO_SIDE];
-        let mut top_of: [usize; HALO_SIDE] = [CHUNK_HEIGHT; HALO_SIDE];
         for hx in 0..HALO_SIDE {
             let world_x = (sub_x + hx) as isize - 1;
             let dx = world_x.div_euclid(CHUNK_SIDE as isize);
@@ -334,13 +311,6 @@ fn fill_halo(
             let ns = neighbor_slots[((dx + 1) + (dz + 1) * 3) as usize];
             slot_of[hx] = ns;
             col_of[hx] = local_z * CHUNK_SIDE + local_x;
-            // Верх колонки известен только для текущего чанка (`dx == 0`) — у
-            // соседей свои карты высот, а halo-столбцы соседей тонкие (18 ячеек),
-            // экономия на них не оправдывает чтения чужих карт. `column_tops`
-            // хранит `y_top + 1`: при `y >= top` блока нет по определению.
-            if dx == 0 {
-                top_of[hx] = tops[col_of[hx]] as usize;
-            }
         }
 
         for hy in 0..HALO_HEIGHT {
@@ -363,15 +333,6 @@ fn fill_halo(
             for hx in 0..HALO_SIDE {
                 row[hx] = match slot_of[hx] {
                     Some(s) => pool.get(s, col_of[hx] * CHUNK_HEIGHT + y).material_id,
-                    //  Some(s) => {
-                    //      // Пропуск пустого неба: блок выше вершины колонки не
-                    //      // может существовать, читаем пул только до `top`.
-                    //      if y >= top_of[hx] {
-                    //          ids::AIR
-                    //      } else {
-                    //          pool.get(s, col_of[hx] * CHUNK_HEIGHT + y).material_id
-                    //      }
-                    //  },
                     // Слота соседа нет — это край активного окна. Считаем его
                     // сплошным (`HALO_OPAQUE`), чтобы на границе окна не строились
                     // стены: за краем всё равно ничего не видно, а пересборка при

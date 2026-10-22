@@ -28,7 +28,11 @@ const SEA_LEVEL: usize = 30;
 const CANYON_TOP: usize = 64;
 /// Максимальная высота гор (отдельная карта, множитель до диапазона)
 const MOUNTAIN_MAX: usize = 384;
-/// Максимальная высота пиков (редкие шпильки 1-2 на мир, проверка швов)
+/// Нижняя точка профиля горы (старт «ядра» после нормализации)
+const MOUNTAIN_MIN: usize = 64;
+/// Верхняя граница пиков перед обрезкой (см. lerp-полигон ниже)
+const SPIKE_LERP_MAX: usize = 800;
+/// Верхняя граница пика в блоках (после lerp до 800 и обрезки).
 const SPIKE_MAX: usize = 512;
 
 /// Масштаб шума для 4D-отображения (общий базовый радиус в 4D-торе)
@@ -58,6 +62,12 @@ const BASE_AMP: usize = 46;    // низменья: y ∈ [CANYON_TOP - BASE_AMP
 const CANYON_THRESHOLD: f64 = 0.62;
 /// Глубина выреза каньона (максимум, в блоках)
 const CANYON_DEPTH: usize = 40;
+
+/// Доля от фактического максимума карты, после которой начинается «ядро» горы.
+/// Выше `MOUNT_GATE * max` нормализованный профиль растёт к вершине горы.
+const MOUNT_GATE: f64 = 0.80;
+/// То же для пиков: ядро должно быть крошечным (1-2 башни на мир).
+const SPIKE_GATE: f64 = 0.93;
 
 /// Трава: диапазон высот + параметры прореживания
 const GRASS_MIN_Y: usize = 12;   // ниже — берег/вода, травы нет
@@ -104,7 +114,7 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
 
     // Инициализация генератора шума: отдельный FBM на каждую карту,
     // со своим seed (смещаем базовый seed) — карты статистически независимы.
-        let mk_fbm = |seed_off: u32, freq_scale: f64| -> (Fbm<OpenSimplex>, f64) {
+    let mk_fbm = |seed_off: u32, freq_scale: f64| -> (Fbm<OpenSimplex>, f64) {
         let mut fbm = Fbm::<OpenSimplex>::new(world_seed.wrapping_add(seed_off));
         fbm.octaves = FBM_OCTAVES;
         fbm.persistence = FBM_PERSISTENCE;
@@ -114,14 +124,92 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
     let (hills_fbm, hills_s) = mk_fbm(1, HILLS_FREQ);
     let (base_fbm, base_s) = mk_fbm(2, BASE_FREQ);
     let (canyon_fbm, canyon_s) = mk_fbm(3, CANYON_FREQ);
-    let (mount_fbm, mount_s) = mk_fbm(4, MOUNT_FREQ);
-    let (spike_fbm, spike_s) = mk_fbm(5, SPIKE_FREQ);
     let (spray_fbm, spray_s) = mk_fbm(6, SPRAY_FREQ);
     let (biome_fbm, biome_s) = mk_fbm(7, BIOME_FREQ);
 
     let world_width = (chunks_x as usize) * CHUNK_SIDE;
     let world_depth = (chunks_z as usize) * CHUNK_SIDE;
     let two_pi = std::f64::consts::PI * 2.0;
+
+    // ── Подбор карт гор и пиков (твоя схема: новая карта → проверка → ещё) ──
+    // Профиль нормализуем по фактическому максимуму шума, поэтому «дотянет ли»
+    // гора до потолка зависит только от редкости максимума: считаем глобальный
+    // профиль высот один раз, находим экстремумы и выбираем первую карту,
+    // у которой пик достаточно выражен, чтобы после нормализации достать
+    // до `CHUNK_HEIGHT` (пики) / `MOUNTAIN_MAX` (горы). Время генерации не
+    // критично — мир пишется в файл однократно.
+    let profile = |fbm: &Fbm<OpenSimplex>, scale: f64, gate: f64| -> (f64, usize) {
+        // Возвращает (max_noise, сколько колонок выше gate·max).
+        let mut max_n = 0.0f64;
+        for cz in 0..chunks_z {
+            for cx in 0..chunks_x {
+                for lz in 0..CHUNK_SIDE {
+                    for lx in 0..CHUNK_SIDE {
+                        let gx = (cx as i64 * CHUNK_SIDE as i64 + lx as i64) as f64;
+                        let gz = (cz as i64 * CHUNK_SIDE as i64 + lz as i64) as f64;
+                        let n = noise01(fbm, torus_point(gx, gz, world_width, world_depth, two_pi, scale));
+                        if n > max_n {
+                            max_n = n;
+                        }
+                    }
+                }
+            }
+        }
+        let thr = max_n * gate;
+        let mut above = 0usize;
+        for cz in 0..chunks_z {
+            for cx in 0..chunks_x {
+                for lz in 0..CHUNK_SIDE {
+                    for lx in 0..CHUNK_SIDE {
+                        let gx = (cx as i64 * CHUNK_SIDE as i64 + lx as i64) as f64;
+                        let gz = (cz as i64 * CHUNK_SIDE as i64 + lz as i64) as f64;
+                        let n = noise01(fbm, torus_point(gx, gz, world_width, world_depth, two_pi, scale));
+                        if n >= thr {
+                            above += 1;
+                        }
+                    }
+                }
+            }
+        }
+        (max_n, above)
+    };
+
+    // Пики: 1–2 башни на весь мир → доля колонок над порогом ~2/мировых колонок.
+    let spike_area_target = (2 * CHUNK_SIDE * CHUNK_SIDE) as usize;
+    let mut spike_choice: Option<(Fbm<OpenSimplex>, f64, f64)> = None;
+    for attempt in 0..8u32 {
+        let (fbm, s) = mk_fbm(5 + attempt, SPIKE_FREQ);
+        let (max_n, above) = profile(&fbm, s, SPIKE_GATE);
+        println!(
+            "spike map #{}: max={:.4}, cols>=gate={} (target~{})",
+            attempt, max_n, above, spike_area_target
+        );
+        if above <= spike_area_target * 4 {
+            spike_choice = Some((fbm, s, max_n));
+            break;
+        }
+    }
+    let (spike_fbm, spike_s, spike_max) =
+        spike_choice.expect("не удалось подобрать карту пиков за 8 попыток");
+
+    // Горы: должны гарантированно доставать до MOUNTAIN_MAX после нормализации;
+    // площадь гор грубо 1-3% мира.
+    let mount_area_target = (world_width * world_depth) / 50;
+    let mut mount_choice: Option<(Fbm<OpenSimplex>, f64, f64)> = None;
+    for attempt in 0..8u32 {
+        let (fbm, s) = mk_fbm(20 + attempt, MOUNT_FREQ);
+        let (max_n, above) = profile(&fbm, s, MOUNT_GATE);
+        println!(
+            "mountain map #{}: max={:.4}, cols>=gate={} (target~{})",
+            attempt, max_n, above, mount_area_target
+        );
+        if above <= mount_area_target * 4 {
+            mount_choice = Some((fbm, s, max_n));
+            break;
+        }
+    }
+    let (mount_fbm, mount_s, mount_max) =
+        mount_choice.expect("не удалось подобрать карту гор за 8 попыток");
 
     for cz in 0..chunks_z {
         for cx in 0..chunks_x {
@@ -134,8 +222,8 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
                 (&hills_fbm, hills_s),
                 (&base_fbm, base_s),
                 (&canyon_fbm, canyon_s),
-                (&mount_fbm, mount_s),
-                (&spike_fbm, spike_s),
+                (&mount_fbm, mount_s, mount_max),
+                (&spike_fbm, spike_s, spike_max),
                 (&spray_fbm, spray_s),
                 (&biome_fbm, biome_s),
             );
@@ -188,17 +276,16 @@ fn generate_chunk(
     hills: (&Fbm<OpenSimplex>, f64),
     base: (&Fbm<OpenSimplex>, f64),
     canyon: (&Fbm<OpenSimplex>, f64),
-    mount: (&Fbm<OpenSimplex>, f64),
-    spike: (&Fbm<OpenSimplex>, f64),
+    mount: (&Fbm<OpenSimplex>, f64, f64),
+    spike: (&Fbm<OpenSimplex>, f64, f64),
     spray: (&Fbm<OpenSimplex>, f64),
     biome: (&Fbm<OpenSimplex>, f64),
 ) -> (Vec<Cell>, ChunkHeader) {
     let mut cells = vec![Cell::zeroed(); CELLS_PER_CHUNK];
-
     // Формально обновляем для валидности заголовка, хотя основная логика опирается на column_tops
-    let mut min_solid = CHUNK_HEIGHT as u16;
+    let mut min_solid = (CHUNK_HEIGHT as u16) - 1;
     let mut max_solid = 0u16;
-    let mut min_liquid = CHUNK_HEIGHT as u16;
+    let mut min_liquid = (CHUNK_HEIGHT as u16) - 1;
     let mut max_liquid = 0u16;
 
     for lz in 0..CHUNK_SIDE {
@@ -226,23 +313,38 @@ fn generate_chunk(
             };
             let mut surface = lowlands.saturating_sub(canyon_cut).max(foundation + 1);
 
-            // 3. Горы: отдельная карта, множитель масштабирует до диапазона 1..384.
-            //    Степенная функция обостряет пики карты, оставляя низины открытыми.
-            let m_n = noise01(mount.0, torus_point(gx, gz, world_width, world_depth, two_pi, mount.1));
-            let m_shape = m_n * m_n * m_n; // кубический множитель: горы занимают меньшую площадь
-            let mountain_h = (m_shape * MOUNTAIN_MAX as f64) as usize;
-            if mountain_h > surface {
-                surface = mountain_h.max(foundation + 1);
+            // 3. Горы: отдельная карта, нормализованная по фактическому максимуму.
+            //    Порог MOUNT_GATE·max задаёт «ядро» горы; внутри ядра кубический
+            //    профиль даёт пологие склоны и острую вершину. Нормализация по
+            //    глобальному максимуму гарантирует: самая высокая гора мира после
+            //    масштабирования достанет ровно до `MOUNTAIN_MAX`.
+            let (mount_fbm, mount_s, mount_max) = mount;
+            let m_n = noise01(mount_fbm, torus_point(gx, gz, world_width, world_depth, two_pi, mount_s));
+            let m_thr = mount_max * MOUNT_GATE;
+            if m_n > m_thr {
+                let t = ((m_n - m_thr) / (mount_max - m_thr)).clamp(0.0, 1.0);
+                let mountain_h = MOUNTAIN_MIN + (t.powi(3) * (MOUNTAIN_MAX - MOUNTAIN_MIN) as f64) as usize;
+                if mountain_h > surface {
+                    surface = mountain_h.max(foundation + 1);
+                }
             }
 
-            // 4. Пики: очень редкая высокочастотная карта, тонкие шпильки до 512.
-            //    Порог высокий → 1-2 объекта на мир; резкая степенная форма → острые.
-            let s_n = noise01(spike.0, torus_point(gx, gz, world_width, world_depth, two_pi, spike.1));
-            if s_n > 0.90 {
-                let t = (s_n - 0.90) / 0.10; // 0..1 внутри «ядра» пика
-                let room = SPIKE_MAX.saturating_sub(surface);
-                let spike_h = surface + (t.powi(3) * room as f64) as usize;
-                surface = spike_h.min(SPIKE_MAX);
+            // 4. Пики: редкая высокочастотная карта, тонкие шпильки. Профиль —
+            //    lerp от 1 до SPIKE_LERP_MAX (800) с нормализацией по глобальному
+            //    максимуму шума: самый высокий пик мира гарантированно уходит за
+            //    CHUNK_HEIGHT и обрезается потолком → плоская вершина на y=511,
+            //    все субчанки чанка задействованы (проверка швов). Остальные
+            //    пики ниже — естественный разброс от формы шума.
+            let (spike_fbm, spike_s, spike_max) = spike;
+            let s_n = noise01(spike_fbm, torus_point(gx, gz, world_width, world_depth, two_pi, spike_s));
+            let s_thr = spike_max * SPIKE_GATE;
+            if s_n > s_thr {
+                let t = ((s_n - s_thr) / (spike_max - s_thr)).clamp(0.0, 1.0);
+                let raw = 1.0 + t.powi(3) * (SPIKE_LERP_MAX - 1) as f64;
+                let spike_h = (raw as usize).min(SPIKE_MAX); // > CHUNK_HEIGHT отсекут ниже
+                if spike_h > surface {
+                    surface = spike_h;
+                }
             }
 
             let surface = surface.min(CHUNK_HEIGHT - 1);
@@ -253,7 +355,7 @@ fn generate_chunk(
             let grass_ok = fert > GRASS_BIOME_GATE && sp > GRASS_SPRAY_GATE;
 
             // Заполняем колонку.
-            for ly in 0..CHUNK_HEIGHT {
+            for ly in 0..CHUNK_HEIGHT-1 {
                 let cell_index = (lz * CHUNK_SIDE + lx) * CHUNK_HEIGHT + ly;
 
                 let mut material = if ly == 0 || ly <= foundation {
