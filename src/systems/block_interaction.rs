@@ -99,11 +99,19 @@ pub fn block_interaction_system(
     mut highlight: ResMut<HighlightState>,
     origin: Res<MeshWorldOrigin>,
     stats: Res<PerfStats>,
+    tick_timer: Res<Time>,
+    mut action_cooldown: Local<f32>,
 ) {
+    *action_cooldown -= tick_timer.delta_secs();
+    let can_repeat = *action_cooldown <= 0.0;
+
+    let key_place_block = KeyCode::KeyR;
+    let key_remove_block = KeyCode::KeyT;
+
     let t = std::time::Instant::now();
     let toggle_pressed = keys.just_pressed(KeyCode::KeyI);
-    let remove_pressed = keys.just_pressed(KeyCode::KeyT);
-    let place_pressed = keys.just_pressed(KeyCode::KeyR);
+    let remove_pressed = keys.just_pressed(key_remove_block) || (keys.pressed(key_remove_block) && can_repeat);
+    let place_pressed = keys.just_pressed(key_place_block) || (keys.pressed(key_place_block) && can_repeat);
 
     // Переключение режима подсветки.
     if toggle_pressed {
@@ -210,6 +218,9 @@ pub fn block_interaction_system(
     };
 
     let generation = read_window.generation(hit.slot);
+    
+    // Флаг: совершили ли мы реальное действие в этом кадре
+    let mut action_performed = false;
 
     // T — удалить блок, в который смотрим.
     if remove_pressed {
@@ -223,6 +234,7 @@ pub fn block_interaction_system(
             cell,
             generation,
         ));
+        action_performed = true;
     }
 
     // R — поставить камень в соседнюю клетку по грани попадания. Цель:
@@ -268,6 +280,11 @@ pub fn block_interaction_system(
                 generation,
             ));
         }
+        action_performed = true;
+    }
+
+    if action_performed {
+        *action_cooldown = 0.15;
     }
 
     stats.record(Bucket::BlockInteraction, t.elapsed());

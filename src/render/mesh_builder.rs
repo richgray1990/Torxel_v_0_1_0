@@ -119,7 +119,7 @@ pub struct HaloBuf {
 
 impl HaloBuf {
     pub const fn new() -> Self {
-        Self { cells: [ids::AIR; HALO_CELLS] }
+        Self { cells: [MATERIAL_OUT_OF_WORLD; HALO_CELLS] }
     }
 
     /// Локальные координаты halo: 0..18. Центр субчанка — 1..17.
