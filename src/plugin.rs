@@ -101,24 +101,27 @@ pub enum GCPhaseSet {
 
 /// Плагин менеджера чанков
 pub struct TorxelPlugin {
-    pub topology: TorusTopology,
-    pub world_path: std::path::PathBuf,
+    pub world_path: std::path::PathBuf
 }
 
 impl Plugin for TorxelPlugin {
     fn build(&self, app: &mut App) {
-        let header = WorldHeader::new(
-            self.topology.chunks_x as u32,
-            self.topology.chunks_z as u32,
-            crate::voxel::format::CHUNK_HEIGHT as u32,
-        );
+        let header = match Self::read_or_create_world_header(&self.world_path) {
+            Ok(h) => h,
+            Err(e) => {
+                panic!("Failed to read world header: {}", e);
+            }
+        };
+        
+        // Создаём топологию из реальных размеров мира
+        let topology = TorusTopology::new(header.chunks_x as u64, header.chunks_z as u64);
 
         let (io_manager, worker_channels) = IoManager::new();
         let _worker = IoWorker::spawn(worker_channels, self.world_path.clone(), header);
 
         // Регистрация ресурсов
-        app.insert_resource(ChunkManager::new(self.topology.clone()));
-        app.insert_resource(ReadWindowManager::new(&self.topology));
+        app.insert_resource(ChunkManager::new(topology.clone()));
+        app.insert_resource(ReadWindowManager::new(&topology));
 
         app.insert_resource(ReadWorld(ChunkPool::new_max()));
         app.insert_resource(WriteWorld(ChunkPool::new_max()));
@@ -354,5 +357,41 @@ impl Plugin for TorxelPlugin {
         );
         
         app.add_systems(Update, debug_report_system);
+    }
+    
+}
+
+impl TorxelPlugin {
+    /// Читает заголовок мира из файла. Если файла нет — создаёт новый с указанными размерами.
+    fn read_or_create_world_header(
+        path: &std::path::Path
+    ) -> std::io::Result<WorldHeader> {
+        use std::fs::{File};
+        use std::io::{Read};
+        
+        if path.exists() {
+            // Файл есть — читаем заголовок
+            let mut file = File::open(path)?;
+            let mut header_bytes = vec![0u8; std::mem::size_of::<WorldHeader>()];
+            file.read_exact(&mut header_bytes)?;
+            
+            let header: WorldHeader = bytemuck::pod_read_unaligned(&header_bytes);
+            
+            if !header.is_valid() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid world header: magic or version mismatch",
+                ));
+            }
+            
+            println!("[PLUGIN] Loaded world header: {}x{} chunks, spawn=({}, {})",
+                header.chunks_x, header.chunks_z, header.spawn_x, header.spawn_z);
+            Ok(header)
+        } else {
+           return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidFilename,
+                    "Invalid filename: file foes not exist!",
+                ));
+        }
     }
 }

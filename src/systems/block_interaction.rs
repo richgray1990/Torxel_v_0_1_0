@@ -101,6 +101,7 @@ pub fn block_interaction_system(
     stats: Res<PerfStats>,
     tick_timer: Res<Time>,
     mut action_cooldown: Local<f32>,
+    mut last_interact_pos: Local<Option<(i64, i64, i64)>>
 ) {
     *action_cooldown -= tick_timer.delta_secs();
     let can_repeat = *action_cooldown <= 0.0;
@@ -194,6 +195,7 @@ pub fn block_interaction_system(
         MAX_RAY_DISTANCE,
         &read_world,
         &read_window,
+        *last_interact_pos
     );
 
     // Подсветка обновляется только если режим включён.
@@ -281,6 +283,7 @@ pub fn block_interaction_system(
             ));
         }
         action_performed = true;
+        *last_interact_pos = Some((px, py, pz));
     }
 
     if action_performed {
@@ -360,6 +363,7 @@ fn voxel_ray_cast(
     max_dist: f64,
     read_world: &ReadWorld,
     read_window: &ReadWindowManager,
+    ignore_pos: Option<(i64, i64, i64)>,
 ) -> Option<VoxelHit> {
     let height = CHUNK_HEIGHT as i64;
 
@@ -433,7 +437,7 @@ fn voxel_ray_cast(
     // Лицо входа стартового вокселя (используется только если он сразу hit).
     let (mut entry_axis, mut entry_step) = if t_enter_x <= t_enter_y && t_enter_x <= t_enter_z {
         (0u8, step_x)
-    } else if t_enter_y <= t_enter_z {
+    } else if t_enter_yxz <= t_enter_z {
         (1u8, step_y)
     } else {
         (2u8, step_z)
@@ -467,7 +471,7 @@ fn voxel_ray_cast(
         }
         // Внутри мира — проверяем воксель.
         else {
-            if let Some(hit) = check_voxel(vx, vy, vz, read_world, read_window) {
+            if let Some(hit) = check_voxel(vx, vy, vz, read_world, read_window, ignore_pos) {
                 let mut hit = hit;
                 hit.entry_axis = entry_axis;
                 hit.entry_step = entry_step;
@@ -504,9 +508,16 @@ fn check_voxel(
     wz: i64,
     read_world: &ReadWorld,
     read_window: &ReadWindowManager,
+    ignore_pos: Option<(i64, i64, i64)>
 ) -> Option<VoxelHit> {
     if wy < 0 || wy >= CHUNK_HEIGHT as i64 {
         return None;
+    }
+
+    if let Some((ix, iy, iz)) = ignore_pos {
+        if wx == ix && wy == iy && wz == iz {
+            return None; // Считаем его "воздухом", луч летит дальше вглубь
+        }
     }
 
     let chunk_x_raw = wx.div_euclid(CHUNK_SIDE as i64);

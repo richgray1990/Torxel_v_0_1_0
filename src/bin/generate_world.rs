@@ -91,7 +91,7 @@ fn generate_world(chunks_x: u32, chunks_z: u32, path: &PathBuf, starter: &Instan
         .expect("Time went backwards")
         .as_millis() as u32;
 
-    let mut header = WorldHeader::new(chunks_x, chunks_z, CHUNK_HEIGHT as u32).with_spawn(5, 3);
+    let mut header = WorldHeader::new(chunks_x, chunks_z, CHUNK_HEIGHT as u32).with_spawn(0, 0);
 
     header.with_world_seed(world_seed);
 
