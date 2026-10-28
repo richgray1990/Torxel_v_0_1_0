@@ -437,7 +437,7 @@ fn voxel_ray_cast(
     // Лицо входа стартового вокселя (используется только если он сразу hit).
     let (mut entry_axis, mut entry_step) = if t_enter_x <= t_enter_y && t_enter_x <= t_enter_z {
         (0u8, step_x)
-    } else if t_enter_yxz <= t_enter_z {
+    } else if t_enter_y <= t_enter_z {
         (1u8, step_y)
     } else {
         (2u8, step_z)
