@@ -50,10 +50,6 @@ pub fn poll_background_tasks_system(
                 grid_x: meta.grid_x,
                 grid_z: meta.grid_z,
                 data: response.data,
-                min_solid_y: response.min_solid_y,
-                max_solid_y: response.max_solid_y,
-                min_liquid_y: response.min_liquid_y,
-                max_liquid_y: response.max_liquid_y,
                 column_tops: response.column_tops,
             });
         } else {
@@ -80,10 +76,6 @@ pub fn poll_background_tasks_system(
             .column_slice_mut(slot)
             .copy_from_slice(&staged_chunk.column_tops);
 
-        manager.metadata[slot].min_solid_y = staged_chunk.min_solid_y;
-        manager.metadata[slot].max_solid_y = staged_chunk.max_solid_y;
-        manager.metadata[slot].min_liquid_y = staged_chunk.min_liquid_y;
-        manager.metadata[slot].max_liquid_y = staged_chunk.max_liquid_y;
 
         manager.set_slot_state(slot, SlotState::Ready);
         manager.metadata[slot].generation = 0;

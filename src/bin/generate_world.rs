@@ -277,11 +277,7 @@ fn generate_chunk(
 ) -> (Vec<Cell>, ChunkHeader) {
     let mut cells = vec![Cell::zeroed(); CELLS_PER_CHUNK];
     // Формально обновляем для валидности заголовка, хотя основная логика опирается на column_tops
-    let mut min_solid = (CHUNK_HEIGHT as u16) - 1;
-    let mut max_solid = 0u16;
-    let mut min_liquid = (CHUNK_HEIGHT as u16) - 1;
-    let mut max_liquid = 0u16;
-
+    
     for lz in 0..CHUNK_SIDE {
         for lx in 0..CHUNK_SIDE {
             // Глобальные координаты блока
@@ -398,40 +394,12 @@ fn generate_chunk(
                 }
 
                 cells[cell_index].material_id = material;
-
-                match material {
-                    AIR => {}
-                    WATER => {
-                        let y = ly as u16;
-                        if y < min_liquid {
-                            min_liquid = y;
-                        }
-                        if y > max_liquid {
-                            max_liquid = y;
-                        }
-                    }
-                    _ => {
-                        let y = ly as u16;
-                        if y < min_solid {
-                            min_solid = y;
-                        }
-                        if y > max_solid {
-                            max_solid = y;
-                        }
-                    }
-                }
             }
         }
     }
 
     let chunk_data_size = (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32;
     let mut header = ChunkHeader::new(chunk_data_size, CELLS_PER_CHUNK as u32);
-
-    // Заполняем для совместимости, но основным источником истины является column_tops
-    header.min_solid_y = min_solid;
-    header.max_solid_y = max_solid;
-    header.min_liquid_y = min_liquid;
-    header.max_liquid_y = max_liquid;
 
     // Карта высот вычисляется один раз на основе сгенерированных ячеек
     header.column_tops = column_tops(&cells);

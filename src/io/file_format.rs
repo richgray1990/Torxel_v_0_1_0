@@ -8,20 +8,13 @@ pub const WORLD_MAGIC: u32 = 0x54584C56; // "TXLV"
 /// Магическое число заголовка чанка
 pub const CHUNK_MAGIC: u32 = 0x43484E4B; // "CHNK"
 /// Текущая версия формата
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 3;
 /// Версия заголовка чанка.
 ///
-/// 2 — заголовок несёт column_tops и весит 540 Б вместо 32. Чанки старого файла
+/// 3 — Заголовок несёт column_tops и весит 532 Б. Чанки старого файла
 /// лежат по другому смещению, поэтому is_valid обязан их отсечь: иначе ячейки
-/// читались бы с середины чужого заголовка.
-///
-/// Семантика значений column_tops: индекс верхнего непустого блока
-/// (0..=CHUNK_HEIGHT - 1), без прежнего +1. Размер/раскладка заголовка при
-/// этом не менялись, bump версии не требуется — но старые файлы (с +1)
-/// грузятся как карта на один блок выше реальной верхушки. Единственный
-/// потребитель карты сейчас — маска обрывов в dispatch_loaded, ошибка там
-/// безвредна (лишний пересчёт субчанка). Для корректных карт перегенерируйте
-/// миры новой версией генератора.
+/// читались бы с середины чужого заголовка
+/// 
 pub const CHUNK_VERSION: u16 = 2;
 /// Флаги чанка
 pub mod chunk_flags {
@@ -39,22 +32,12 @@ pub struct ChunkHeader {
     pub data_size: u32,
     pub checksum: u32,
     pub cell_count: u32,
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
-    /// Верхний блок каждой колонки: индекс верхнего непустого блока
-    /// (0..=CHUNK_HEIGHT - 1), 0 — колонка пуста.
-    ///
-    /// Считает генератор, хранится в файле. Позволяет пропускать пустое небо
-    /// без скана ячеек (мешер сейчас карту высот не использует намеренно —
-    /// она учитывает только твёрдые блоки).
     pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 unsafe impl Pod for ChunkHeader {}
 unsafe impl Zeroable for ChunkHeader {}
 const _: () = assert!(
-    std::mem::size_of::<ChunkHeader>() == 540,
+    std::mem::size_of::<ChunkHeader>() == 532,
     "ChunkHeader must be exactly 540 bytes"
 );
 impl ChunkHeader {
@@ -66,10 +49,6 @@ impl ChunkHeader {
             data_size,
             checksum: 0,
             cell_count,
-            min_solid_y: 0,
-            max_solid_y: 0,
-            min_liquid_y: 0,
-            max_liquid_y: 0,
             column_tops: [0; COLUMNS_PER_CHUNK],
         }
     }

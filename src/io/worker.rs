@@ -134,10 +134,6 @@ impl IoWorker {
                 slot: request.slot,
                 chunk_x: request.chunk_x,
                 chunk_z: request.chunk_z,
-                min_solid_y: chunk_header.min_solid_y,
-                max_solid_y: chunk_header.max_solid_y,
-                min_liquid_y: chunk_header.min_liquid_y,
-                max_liquid_y: chunk_header.max_liquid_y,
                 column_tops: Self::header_tops(&chunk_header, &data),
                 data,
                 success: true,
@@ -164,10 +160,6 @@ impl IoWorker {
         }
 
         let chunk_header = ChunkHeader {
-            min_solid_y: request.min_solid_y,
-            max_solid_y: request.max_solid_y,
-            min_liquid_y: request.min_liquid_y,
-            max_liquid_y: request.max_liquid_y,
             column_tops: request.column_tops,
             ..ChunkHeader::new(
                 (CELLS_PER_CHUNK * std::mem::size_of::<Cell>()) as u32,
@@ -214,11 +206,8 @@ impl IoWorker {
 
     /// Верхние блоки колонок из заголовка чанка.
     ///
-    /// Если `max_solid_y > 0`, а карта целиком нулевая — заголовок битый
-    /// (оборванная запись, чанк чужого происхождения). Без пересчёта такой чанк
-    /// дал бы невидимый мир: мешер пропустил бы все колонки как пустые.
     fn header_tops(header: &ChunkHeader, data: &[Cell]) -> [u16; COLUMNS_PER_CHUNK] {
-        if header.max_solid_y > 0 && header.column_tops.iter().all(|&t| t == 0) {
+        if header.column_tops.iter().all(|&t| t == 0) {
             return column_tops(data);
         }
 
@@ -231,10 +220,6 @@ impl IoWorker {
             chunk_x,
             chunk_z,
             data: vec![Cell::zeroed(); CELLS_PER_CHUNK],
-            min_solid_y: 0,
-            max_solid_y: 0,
-            min_liquid_y: 0,
-            max_liquid_y: 0,
             column_tops: [0; crate::voxel::height_map::COLUMNS_PER_CHUNK],
             success: false,
         }

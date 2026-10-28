@@ -88,23 +88,13 @@ pub fn chunk_garbage_collector_system(
             let mut column_tops = [0u16; crate::voxel::height_map::COLUMNS_PER_CHUNK];
             column_tops.copy_from_slice(read_window.height_map.column_slice(slot));
 
-            let meta = &manager.metadata[slot];
-            let (min_solid_y, max_solid_y, min_liquid_y, max_liquid_y) = (
-                meta.min_solid_y,
-                meta.max_solid_y,
-                meta.min_liquid_y,
-                meta.max_liquid_y,
-            );
+            //let meta = &manager.metadata[slot];
 
             manager.save_queue.push(SaveRequest {
                 slot,
                 chunk_x: grid_x as usize,
                 chunk_z: grid_z as usize,
                 data,
-                min_solid_y,
-                max_solid_y,
-                min_liquid_y,
-                max_liquid_y,
                 column_tops,
             });
 

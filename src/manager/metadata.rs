@@ -3,7 +3,7 @@
 //! Без Atomic, без скрытой мутабельности.
 //! Мутация только через &mut self.
 
-use crate::voxel::format::CHUNK_HEIGHT;
+//use crate::voxel::format::CHUNK_HEIGHT;
 
 /// Состояния слотов
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -41,16 +41,6 @@ pub struct SlotMetadata {
     /// Флаг: уведомлён ли рендер о загрузке чанка
     pub render_notified: bool,
 
-    // Высотные границы (записываются один раз при загрузке)
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
-
-    /// Границы выше стали недостоверны (чанк правили после загрузки).
-    /// При `true` меширование сканирует весь чанк, а не только диапазон содержимого.
-    pub bounds_stale: bool,
-
     pub generation: u64,
 }
 
@@ -67,11 +57,6 @@ impl SlotMetadata {
             load_frames: 0,
             dirty_subchunks: 0,
             render_notified: false,
-            min_solid_y: (CHUNK_HEIGHT as u16) - 1,
-            max_solid_y: 0,
-            min_liquid_y: (CHUNK_HEIGHT as u16) - 1,
-            max_liquid_y: 0,
-            bounds_stale: false,
             generation: 0,
         }
     }

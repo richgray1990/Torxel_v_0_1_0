@@ -4,7 +4,7 @@
 
 use bevy::prelude::*;
 
-use crate::voxel::format::{POOL_CHUNK_COUNT, CHUNK_HEIGHT};
+use crate::voxel::format::{POOL_CHUNK_COUNT};   //, CHUNK_HEIGHT
 use crate::voxel::height_map::HeightMap;
 use crate::voxel::topology::TorusTopology;
 
@@ -16,17 +16,6 @@ pub struct ReadSlotSnapshot {
     pub grid_z: i64,
     pub state: SlotState,
     pub generation: u64,
-
-    /// Высотные границы содержимого чанка. Используются мешированием, чтобы
-    /// не сканировать пустые субчанки. Живут в снапшоте, а не в `ChunkManager`,
-    /// потому что иначе система мешей получила бы конфликт доступа с пост-свапом.
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
-
-    /// Границы недостоверны (чанк правили после загрузки) — сканировать весь чанк.
-    pub bounds_stale: bool,
 }
 
 impl ReadSlotSnapshot {
@@ -37,11 +26,6 @@ impl ReadSlotSnapshot {
             grid_z: -1,
             state: SlotState::Empty,
             generation: 0,
-            min_solid_y: (CHUNK_HEIGHT as u16) - 1,
-            max_solid_y: 0,
-            min_liquid_y: (CHUNK_HEIGHT as u16) - 1,
-            max_liquid_y: 0,
-            bounds_stale: true,
         }
     }
 
@@ -52,11 +36,6 @@ impl ReadSlotSnapshot {
             grid_z: meta.grid_z,
             state: meta.get_state(),
             generation: meta.generation,
-            min_solid_y: meta.min_solid_y,
-            max_solid_y: meta.max_solid_y,
-            min_liquid_y: meta.min_liquid_y,
-            max_liquid_y: meta.max_liquid_y,
-            bounds_stale: meta.bounds_stale,
         }
     }
 }
@@ -199,15 +178,23 @@ impl ReadWindowManager {
     /// скипа (`sub_y_end <= min || sub_y > max`) отсекает все субчанки.
     #[inline(always)]
     pub fn content_y_range(&self, slot: usize) -> Option<(u16, u16)> {
-        let snap = &self.snapshots[slot];
-
-        if snap.bounds_stale {
-            return None;
-        }
-
-        Some((
-            snap.min_solid_y.min(snap.min_liquid_y),
-            snap.max_solid_y.max(snap.max_liquid_y),
-        ))
+    //let snap = &self.snapshots[slot];
+    
+    let tops = self.height_map.column_slice(slot); // &[u16; 256]
+    
+    // Находим глобальные min и max по всем 256 колонкам чанка.
+    // Компилятор легко векторизует этот скан (SIMD), это займет ~10-20 нс.
+    let mut min_y = u16::MAX;
+    let mut max_y = 0u16;
+    
+    for &top in tops {
+        if top < min_y { min_y = top; }
+        if top > max_y { max_y = top; }
     }
+    
+    // Фолбэк на случай полностью пустого чанка (в реальности недостижим из-за bedrock)
+    if min_y == u16::MAX { return Some((0, 0)); }
+    
+    Some((min_y, max_y))
+}
 }

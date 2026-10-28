@@ -24,11 +24,6 @@ pub struct LoadResponse {
     pub chunk_x: usize,
     pub chunk_z: usize,
     pub data: Vec<Cell>,
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
-    /// Верхние блоки колонок, посчитанные воркером на горячем кэше.
     pub column_tops: [u16; COLUMNS_PER_CHUNK],
     pub success: bool,
 }
@@ -44,11 +39,6 @@ pub struct SaveRequest {
     pub chunk_x: usize,
     pub chunk_z: usize,
     pub data: Vec<Cell>,
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
-    /// Карта верхних блоков — едет в заголовок чанка на диске.
     pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 

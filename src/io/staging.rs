@@ -13,10 +13,6 @@ pub struct StagedChunk {
     pub grid_x: i64,
     pub grid_z: i64,
     pub data: Vec<Cell>,
-    pub min_solid_y: u16,
-    pub max_solid_y: u16,
-    pub min_liquid_y: u16,
-    pub max_liquid_y: u16,
     pub column_tops: [u16; COLUMNS_PER_CHUNK],
 }
 
