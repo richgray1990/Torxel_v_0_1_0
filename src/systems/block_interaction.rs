@@ -105,7 +105,7 @@ pub fn block_interaction_system(
 ) {
     *action_cooldown -= tick_timer.delta_secs();
     let can_repeat = *action_cooldown <= 0.0;
-    if(can_repeat) {*last_interact_pos = None;}
+    if can_repeat {*last_interact_pos = None;}
 
     let key_place_block = KeyCode::KeyR;
     let key_remove_block = KeyCode::KeyT;

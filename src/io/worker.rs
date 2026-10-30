@@ -89,7 +89,20 @@ impl IoWorker {
                 channels.save_response_sender.send(response).ok();
             }
 
-            thread::sleep(std::time::Duration::from_millis(1));
+            match channels.load_receiver.recv_timeout(std::time::Duration::from_millis(1)) {
+                Ok(request) => {
+                    let response = Self::handle_load_request(
+                        &mut file,
+                        &header,
+                        header_size,
+                        chunk_total_size,
+                        request,
+                    );
+                    channels.load_response_sender.send(response).ok();
+                }
+                Err(flume::RecvTimeoutError::Timeout) => {}
+                Err(flume::RecvTimeoutError::Disconnected) => break,
+            }
         }
 
         file.flush().ok();
