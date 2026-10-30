@@ -98,7 +98,7 @@ static MAT_LUT: std::sync::LazyLock<MatLut> = std::sync::LazyLock::new(|| {
 /// та не помещалась в L1 и ловила cache miss на каждую грань.
 #[inline(always)]
 pub fn is_face_visible(lut: &MatLut, current: u8, neighbor: u8) -> bool {
-    if !lut.transparent[neighbor as usize] {
+    if !lut.transparent[neighbor as usize] || lut.cutoff[neighbor as usize] {
         return false;
     }
     current != neighbor || current == ids::AIR
