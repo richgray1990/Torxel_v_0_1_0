@@ -177,7 +177,7 @@ impl ReadWindowManager {
     /// весь чанк. Пустой чанк даёт `Some((CHUNK_HEIGHT, 0))`, что вместе с условием
     /// скипа (`sub_y_end <= min || sub_y > max`) отсекает все субчанки.
     #[inline(always)]
-    pub fn content_y_range(&self, slot: usize) -> Option<(u16, u16)> {
+    pub fn content_y_range(&self, slot: usize) -> (u16, u16) {
     //let snap = &self.snapshots[slot];
     
     let tops = self.height_map.column_slice(slot); // &[u16; 256]
@@ -193,8 +193,8 @@ impl ReadWindowManager {
     }
     
     // Фолбэк на случай полностью пустого чанка (в реальности недостижим из-за bedrock)
-    if min_y == u16::MAX { return Some((0, 0)); }
+    if min_y == u16::MAX { return (0, 0); }
     
-    Some((min_y, max_y))
+    (min_y, max_y)
 }
 }

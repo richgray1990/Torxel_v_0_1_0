@@ -3,10 +3,10 @@
 use bevy::prelude::*;
 
 use crate::voxel::format::{
-    CHUNK_HEIGHT, CHUNK_SIDE, MATERIAL_OUT_OF_WORLD, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE,
-    SUBCHUNKS_X, SUBCHUNKS_Y,
+    CHUNK_HEIGHT, CHUNK_SIDE, MATERIAL_OUT_OF_WORLD, SUBCHUNK_HEIGHT, SUBCHUNK_SIDE, SUBCHUNKS_X,
+    SUBCHUNKS_Y,
 };
-use crate::voxel::materials::{ids, is_face_visible, mat_lut, MatLut};
+use crate::voxel::materials::{MatLut, ids, is_face_visible, mat_lut};
 use crate::voxel::pool::ChunkPool;
 
 use crate::manager::ReadWindowManager;
@@ -19,37 +19,72 @@ pub const MAX_VERTICES_PER_SUBCHUNK: usize =
     SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 4;
 
 /// Теоретическая верхняя граница индексов в субчанке. См. `MAX_VERTICES_PER_SUBCHUNK`.
-pub const MAX_INDICES_PER_SUBCHUNK: usize =
-    SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 6;
+pub const MAX_INDICES_PER_SUBCHUNK: usize = SUBCHUNK_SIDE * SUBCHUNK_HEIGHT * SUBCHUNK_SIDE * 6 * 6;
 
 const FACES: [(i64, i64, i64); 6] = [
-    (0, 1, 0), (0, -1, 0),
-    (1, 0, 0), (-1, 0, 0),
-    (0, 0, 1), (0, 0, -1),
+    (0, 1, 0),
+    (0, -1, 0),
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 0, 1),
+    (0, 0, -1),
 ];
 
 const FACE_NORMALS: [[f32; 3]; 6] = [
-    [0.0, 1.0, 0.0], [0.0, -1.0, 0.0],
-    [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0], [0.0, 0.0, -1.0],
+    [0.0, 1.0, 0.0],
+    [0.0, -1.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [-1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 0.0, -1.0],
 ];
 
 const FACE_VERTICES: [[[f32; 3]; 4]; 6] = [
-    [[0.0,1.0,0.0],[0.0,1.0,1.0],[1.0,1.0,0.0],[1.0,1.0,1.0]],  // Верхняя ← ИСПРАВЛЕНО
-    [[0.0,0.0,0.0],[0.0,0.0,1.0],[1.0,0.0,0.0],[1.0,0.0,1.0]],
-    [[1.0,0.0,0.0],[1.0,1.0,0.0],[1.0,0.0,1.0],[1.0,1.0,1.0]],
-    [[0.0,0.0,0.0],[0.0,0.0,1.0],[0.0,1.0,0.0],[0.0,1.0,1.0]],
-    [[0.0,0.0,1.0],[1.0,0.0,1.0],[0.0,1.0,1.0],[1.0,1.0,1.0]],
-    [[0.0,0.0,0.0],[0.0,1.0,0.0],[1.0,0.0,0.0],[1.0,1.0,0.0]],
+    [
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 1.0, 1.0],
+    ], // Верхняя ← ИСПРАВЛЕНО
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 1.0],
+    ],
+    [
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ],
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 1.0],
+    ],
+    [
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ],
+    [
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+    ],
 ];
 
-const FACE_UVS: [[f32; 2]; 4] = [
-    [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
-];
+const FACE_UVS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
 
 const FACE_INDICES: [u32; 6] = [0, 1, 2, 2, 1, 3];
 
-pub struct SubchunkMeshData {
+/// Данные одного слоя меша.
+#[derive(Default)]
+pub struct MeshLayerData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
@@ -57,28 +92,48 @@ pub struct SubchunkMeshData {
     pub indices: Vec<u32>,
 }
 
-impl SubchunkMeshData {
-    /// Без предварительного резерва.
-    ///
-    /// Пустой субчанк тогда не аллоцирует вообще ничего, а их 31 из 32 (геометрия
-    /// мира лежит в первой субчанковой полосе). Резерв по `MAX_*` стоил бы ~5 МБ
-    /// на каждый вызов, то есть гигабайты churn за один сдвиг окна.
-    pub fn new() -> Self {
-        Self {
-            positions: Vec::new(),
-            normals: Vec::new(),
-            uvs: Vec::new(),
-            colors: Vec::new(),
-            indices: Vec::new(),
-        }
+impl MeshLayerData {
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.positions.clear();
         self.normals.clear();
         self.uvs.clear();
         self.colors.clear();
         self.indices.clear();
+    }
+}
+
+/// Итоговые данные субчанка, разделённые по типам прозрачности.
+pub struct SubchunkMeshData {
+    pub opaque: MeshLayerData,
+    pub transparent: MeshLayerData,
+    pub alpha_test: MeshLayerData,
+}
+
+impl SubchunkMeshData {
+    pub fn new() -> Self {
+        Self {
+            opaque: MeshLayerData::default(),
+            transparent: MeshLayerData::default(),
+            alpha_test: MeshLayerData::default(),
+        }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.opaque.clear();
+        self.transparent.clear();
+        self.alpha_test.clear();
+    }
+
+    #[inline]
+    pub fn is_totally_empty(&self) -> bool {
+        self.opaque.is_empty() && self.transparent.is_empty() && self.alpha_test.is_empty()
     }
 }
 
@@ -119,7 +174,9 @@ pub struct HaloBuf {
 
 impl HaloBuf {
     pub const fn new() -> Self {
-        Self { cells: [MATERIAL_OUT_OF_WORLD; HALO_CELLS] }
+        Self {
+            cells: [MATERIAL_OUT_OF_WORLD; HALO_CELLS],
+        }
     }
 
     /// Локальные координаты halo: 0..18. Центр субчанка — 1..17.
@@ -167,14 +224,22 @@ pub fn build_subchunk_mesh(
 
     let fill_elapsed = if PERF_ENABLED {
         let t = std::time::Instant::now();
-        fill_halo(halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(
+            halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window,
+        );
         t.elapsed()
     } else {
-        fill_halo(halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window);
+        fill_halo(
+            halo, pool, _slot, chunk_x, chunk_z, sub_x, sub_y, sub_z, window,
+        );
         std::time::Duration::ZERO
     };
 
-    let t_face = if PERF_ENABLED { Some(std::time::Instant::now()) } else { None };
+    let t_face = if PERF_ENABLED {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
 
     let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
 
@@ -224,21 +289,31 @@ pub fn build_subchunk_mesh(
 
                         let normal = FACE_NORMALS[face_idx];
                         let face_verts = FACE_VERTICES[face_idx];
-                        let base_index = mesh_data.positions.len() as u32;
+
+                        // Явное разделение по трём слоям.
+                        let layer = if lut.cutoff[material_id] {
+                            &mut mesh_data.alpha_test
+                        } else if a < 1.0 {
+                            &mut mesh_data.transparent
+                        } else {
+                            &mut mesh_data.opaque
+                        };
+
+                        let base_index = layer.positions.len() as u32;
 
                         for (v_idx, vertex) in face_verts.iter().enumerate() {
-                            mesh_data.positions.push([
+                            layer.positions.push([
                                 lx as f32 + vertex[0],
                                 ly as f32 + vertex[1],
                                 lz as f32 + vertex[2],
                             ]);
-                            mesh_data.normals.push(normal);
-                            mesh_data.uvs.push(FACE_UVS[v_idx]);
-                            mesh_data.colors.push([r, g, b, a]);
+                            layer.normals.push(normal);
+                            layer.uvs.push(FACE_UVS[v_idx]);
+                            layer.colors.push([r, g, b, a]);
                         }
 
                         for idx in FACE_INDICES.iter() {
-                            mesh_data.indices.push(base_index + idx);
+                            layer.indices.push(base_index + *idx);
                         }
                     }
                 }
@@ -249,9 +324,11 @@ pub fn build_subchunk_mesh(
     if let Some(slot) = fill_ns {
         *slot += fill_elapsed.as_nanos() as u64;
     }
+
     if let (Some(slot), Some(t)) = (face_ns, t_face) {
         *slot += t.elapsed().as_nanos() as u64;
     }
+    
 }
 
 /// Заполняет `halo` блоками субчанка и одноблочным кольцом соседей.

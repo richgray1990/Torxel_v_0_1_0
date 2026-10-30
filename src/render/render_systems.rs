@@ -3,41 +3,225 @@
 use bevy::prelude::*;
 
 use crate::manager::ReadWindowManager;
-use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue};   //-MeshUpdateEvent
+use crate::queues::mesh_queue::{MeshUpdateKind, MeshUpdateQueue}; //-MeshUpdateEvent
+
 use crate::render::camera::CameraController;
-use crate::render::mesh_builder::{build_subchunk_mesh, HaloBuf, SubchunkMeshData};
-use crate::render::mesh_storage::{MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState};
-use crate::render::entity_pool::ChunkEntityPool;
+use crate::render::entity_pool::{ChunkEntityPool, PooledChunkEntity, VoxelMaterials};
+use crate::render::mesh_builder::{HaloBuf, MeshLayerData, SubchunkMeshData, build_subchunk_mesh};
+use crate::render::mesh_storage::{
+    MeshStorage, SubchunkKey, SubchunkRenderData, SubchunkRenderState,
+};
+
+use crate::systems::perf::{Bucket, PERF_ENABLED, PerfStats};
 use crate::voxel::format::{
     //CHUNK_HEIGHT,
-    CHUNK_SIDE, SUBCHUNKS_PER_CHUNK, SUBCHUNKS_X, SUBCHUNKS_Y,
-    SUBCHUNK_HEIGHT, MeshWorldOrigin, ORIGIN_RESET_THRESHOLD, WorldDimensions,
+    CHUNK_SIDE,
+    MeshWorldOrigin,
+    ORIGIN_RESET_THRESHOLD,
+    SUBCHUNK_HEIGHT,
+    SUBCHUNKS_PER_CHUNK,
+    SUBCHUNKS_X,
+    SUBCHUNKS_Y,
+    WorldDimensions,
 };
 use crate::voxel::pool::ReadWorld;
-use crate::systems::perf::{Bucket, PerfStats, PERF_ENABLED};
 
 // Точные трейты вместо `rayon::prelude::*`: в файле уже есть `bevy::prelude::*`,
 // и второй глобальный прелюд рискует конфликтом имён.
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};  //-IntoParallelIterator
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+}; //-IntoParallelIterator
 
-/// Общий материал для всех субчанков.
-///
-/// Цвет приходит через вершинный атрибут `ATTRIBUTE_COLOR`,
-/// поэтому нужен один белый материал на весь рендер.
-#[derive(Resource)]
-pub struct VoxelMaterialHandle(pub Handle<StandardMaterial>);
+#[inline]
+fn has_any_mesh(data: &SubchunkRenderData) -> bool {
+    data.current_opaque.is_some()
+        || data.current_transparent.is_some()
+        || data.current_alpha_test.is_some()
+}
 
-/// Создаёт общий материал вокселя один раз при старте.
-pub fn init_voxel_material_system(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+fn take_layer_mesh(layer: &mut MeshLayerData, meshes: &mut Assets<Mesh>) -> Option<Handle<Mesh>> {
+    if layer.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::render::mesh::PrimitiveTopology::TriangleList,
+        Default::default(),
+    );
+
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        std::mem::take(&mut layer.positions),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, std::mem::take(&mut layer.normals));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, std::mem::take(&mut layer.uvs));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, std::mem::take(&mut layer.colors));
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(std::mem::take(
+        &mut layer.indices,
+    )));
+
+    Some(meshes.add(mesh))
+}
+
+fn apply_layer(
+    layer: &mut MeshLayerData,
+    current: &mut Option<Handle<Mesh>>,
+    pending: &mut Option<Handle<Mesh>>,
+    meshes: &mut Assets<Mesh>,
+    was_dirty: bool,
 ) {
-    let handle = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        ..Default::default()
-    });
+    let handle = take_layer_mesh(layer, meshes);
 
-    commands.insert_resource(VoxelMaterialHandle(handle));
+    if was_dirty {
+        *pending = handle;
+    } else {
+        *current = handle;
+    }
+}
+
+fn swap_layer(
+    current: &mut Option<Handle<Mesh>>,
+    pending: &mut Option<Handle<Mesh>>,
+    entity: &mut Option<Entity>,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+) {
+    // Удаляем старый меш.
+    if let Some(old) = current.take() {
+        // Если нового меща нет, сразу снимаем Mesh3d с сущности,
+        // чтобы не держать висячую ссылку на удалённый ресурс.
+        if pending.is_none() {
+            if let Some(ent) = *entity {
+                commands.entity(ent).remove::<Mesh3d>();
+            }
+        }
+
+        meshes.remove(&old);
+    }
+
+    // Применяем новый меш.
+    if let Some(new) = pending.take() {
+        if let Some(ent) = *entity {
+            commands.entity(ent).insert(Mesh3d(new.clone()));
+        }
+
+        *current = Some(new);
+    }
+}
+
+fn manage_layer(
+    mesh: &Option<Handle<Mesh>>,
+    entity: &mut Option<Entity>,
+    pool_slot: &mut Option<usize>,
+    position: Vec3,
+    material: &Handle<StandardMaterial>,
+    commands: &mut Commands,
+    pool: &mut ChunkEntityPool,
+) {
+    if let Some(mesh_handle) = mesh {
+        if entity.is_none() {
+            if let Some(slot) = pool.acquire() {
+                let ent = pool
+                    .entity(slot)
+                    .expect("ChunkEntityPool returned invalid slot");
+
+                pool.activate(slot);
+
+                commands.entity(ent).insert((
+                    Mesh3d(mesh_handle.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(position),
+                    Visibility::Visible,
+                    PooledChunkEntity { slot },
+                ));
+
+                *entity = Some(ent);
+                *pool_slot = Some(slot);
+            } else {
+                // Фолбэк: пул исчерпан. Лучше не падать, а создать временную сущность.
+                error!("Chunk entity pool exhausted! Spawning fallback entity.");
+
+                let ent = commands
+                    .spawn((
+                        Mesh3d(mesh_handle.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_translation(position),
+                        Visibility::Visible,
+                    ))
+                    .id();
+
+                *entity = Some(ent);
+                *pool_slot = None;
+            }
+        }
+        // Если сущность уже есть, меш и материал уже назначены.
+        // Новый Mesh3d при перестройке подставляет swap_meshes_system.
+    } else if let Some(ent) = entity.take() {
+        if let Some(slot) = pool_slot.take() {
+            pool.release(slot);
+
+            commands
+                .entity(ent)
+                .remove::<Mesh3d>()
+                .insert(Visibility::Hidden)
+                .remove::<PooledChunkEntity>();
+        } else {
+            // Фолбэк-сущность вне пула.
+            commands.entity(ent).despawn();
+        }
+    }
+}
+
+fn cleanup_subchunk(
+    data: &mut SubchunkRenderData,
+    meshes: &mut Assets<Mesh>,
+    commands: &mut Commands,
+    pool: &mut ChunkEntityPool,
+) {
+    // Удаляем все current и pending меш-ресурсы.
+    let old_meshes: [Option<Handle<Mesh>>; 6] = [
+        data.current_opaque.take(),
+        data.pending_opaque.take(),
+        data.current_transparent.take(),
+        data.pending_transparent.take(),
+        data.current_alpha_test.take(),
+        data.pending_alpha_test.take(),
+    ];
+
+    for mesh in old_meshes {
+        if let Some(handle) = mesh {
+            meshes.remove(&handle);
+        }
+    }
+
+    // Освобождаем все сущности.
+    let entities: [(Option<Entity>, Option<usize>); 3] = [
+        (data.entity_opaque.take(), data.pool_slot_opaque.take()),
+        (
+            data.entity_transparent.take(),
+            data.pool_slot_transparent.take(),
+        ),
+        (
+            data.entity_alpha_test.take(),
+            data.pool_slot_alpha_test.take(),
+        ),
+    ];
+
+    for (entity, slot) in entities {
+        if let Some(ent) = entity {
+            if let Some(s) = slot {
+                pool.release(s);
+
+                commands
+                    .entity(ent)
+                    .remove::<Mesh3d>()
+                    .insert(Visibility::Hidden)
+                    .remove::<PooledChunkEntity>();
+            } else {
+                commands.entity(ent).despawn();
+            }
+        }
+    }
 }
 
 pub fn process_mesh_events_system(
@@ -45,6 +229,7 @@ pub fn process_mesh_events_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
     mut pool: ResMut<ChunkEntityPool>,
+    mut meshes: ResMut<Assets<Mesh>>,
     stats: Res<PerfStats>,
 ) {
     let t = std::time::Instant::now();
@@ -96,21 +281,12 @@ pub fn process_mesh_events_system(
                         chunk_z: event.grid_z,
                         subchunk_index: sub_idx,
                     };
-                    
+
                     if let Some(mut data) = mesh_storage.remove(&key) {
-                        if let Some(entity) = data.entity.take() {
-                            if let Some(slot) = data.pool_slot {
-                                pool.release(slot);
-                                // ТОЛЬКО скрываем
-                                commands.entity(entity)
-                                    .insert(Visibility::Hidden)
-                                    .remove::<PooledChunkEntity>();
-                                continue;
-                            }
-                            commands.entity(entity).despawn();
-                        }
+                        cleanup_subchunk(&mut data, &mut meshes, &mut commands, &mut pool);
                     }
                 }
+                mesh_storage.live_dirty = true;
             }
         }
     }
@@ -215,18 +391,21 @@ pub fn build_meshes_system(
             //
             // Пустой субчанк разбирается здесь же: параллельный участок ему не нужен,
             // а состояние обязано перейти в `Ready`, иначе его будут собирать каждый кадр.
-            if let Some((min_y, max_y)) = read_window.content_y_range(slot) {
-                let sub_y = (key.subchunk_index / SUBCHUNKS_X % SUBCHUNKS_Y) * SUBCHUNK_HEIGHT;
-                let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
+            let (min_y, max_y) = read_window.content_y_range(slot);
+            let sub_y = (key.subchunk_index / SUBCHUNKS_X % SUBCHUNKS_Y) * SUBCHUNK_HEIGHT;
+            let sub_y_end = sub_y + SUBCHUNK_HEIGHT;
 
-                if sub_y > max_y as usize || sub_y_end <= min_y as usize {
-                    if let Some(data) = mesh_storage.get_mut(&key) {
-                        data.current_mesh = None;
-                        data.pending_mesh = None;
-                        data.state = SubchunkRenderState::Ready;
-                    }
-                    break 'item;
+            if sub_y > max_y as usize || sub_y_end <= min_y as usize {
+                if let Some(data) = mesh_storage.get_mut(&key) {
+                    data.current_opaque = None;
+                    data.pending_opaque = None;
+                    data.current_transparent = None;
+                    data.pending_transparent = None;
+                    data.current_alpha_test = None;
+                    data.pending_alpha_test = None;
+                    data.state = SubchunkRenderState::Ready;
                 }
+                break 'item;
             }
 
             work.jobs.push(MeshJob { key, slot });
@@ -282,15 +461,10 @@ pub fn build_meshes_system(
         })
         .reduce(|| (0u64, 0u64), |a, b| (a.0 + b.0, a.1 + b.1));
 
-    // ── Фаза 3: применение (последовательная, детерминированная) ─────────────
-    //
-    // Порядок = порядок `jobs` = порядок `pending_build`, то есть ровно тот, что
-    // был в последовательной версии. `push_swap`/`mark_live` не зависят от
-    // планировщика.
+    // ── Фаза 3: применение (последовательная) ────────────────────────────────
     for (job, mesh_data) in jobs.iter().zip(out.iter_mut()) {
         let key = job.key;
 
-        // Единая точка выхода: `MeshInsert` обязан замериться ровно один раз.
         'apply: {
             let t_ins = std::time::Instant::now();
 
@@ -298,52 +472,62 @@ pub fn build_meshes_system(
                 break 'apply;
             };
 
-            // ИСПРАВЛЕНИЕ: Не создаём меш если нет вершин
-            if mesh_data.positions.is_empty() {
-                // Субчанк пустой — помечаем как Ready без меша. В `live` он не нужен:
-                // сущности у него нет и позиционировать нечего.
-                data.current_mesh = None;
-                data.pending_mesh = None;
-                data.state = SubchunkRenderState::Ready;
+            let was_dirty = data.state == SubchunkRenderState::Dirty;
+
+            // Полностью пустой субчанк.
+            if mesh_data.is_totally_empty() {
+                if was_dirty {
+                    // Был меш/сущности — нужно пройти через swap, чтобы корректно
+                    // удалить старые ресурсы и освободить сущности.
+                    data.pending_opaque = None;
+                    data.pending_transparent = None;
+                    data.pending_alpha_test = None;
+                    data.state = SubchunkRenderState::Rebuilding;
+                    mesh_storage.push_swap(key);
+                } else {
+                    data.current_opaque = None;
+                    data.current_transparent = None;
+                    data.current_alpha_test = None;
+                    data.state = SubchunkRenderState::Ready;
+                }
+
+                stats.record(Bucket::MeshInsert, t_ins.elapsed());
                 break 'apply;
             }
 
-            let mut mesh = Mesh::new(
-                bevy::render::mesh::PrimitiveTopology::TriangleList,
-                Default::default(),
+            if was_dirty {
+                data.state = SubchunkRenderState::Rebuilding;
+            } else {
+                data.state = SubchunkRenderState::Ready;
+            }
+
+            apply_layer(
+                &mut mesh_data.opaque,
+                &mut data.current_opaque,
+                &mut data.pending_opaque,
+                &mut meshes,
+                was_dirty,
             );
 
-            // `mem::take` переносит аллокацию в `Mesh` без копирования вершин;
-            // буфер остаётся пустым и переиспользуется на следующем кадре.
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, std::mem::take(&mut mesh_data.positions));
-            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, std::mem::take(&mut mesh_data.normals));
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, std::mem::take(&mut mesh_data.uvs));
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, std::mem::take(&mut mesh_data.colors));
-            mesh.insert_indices(bevy::render::mesh::Indices::U32(std::mem::take(
-                &mut mesh_data.indices,
-            )));
+            apply_layer(
+                &mut mesh_data.transparent,
+                &mut data.current_transparent,
+                &mut data.pending_transparent,
+                &mut meshes,
+                was_dirty,
+            );
 
-            let mesh_handle = meshes.add(mesh);
-
-            let was_dirty = match data.state {
-                SubchunkRenderState::Empty => {
-                    data.current_mesh = Some(mesh_handle);
-                    data.state = SubchunkRenderState::Ready;
-                    false
-                }
-                SubchunkRenderState::Dirty => {
-                    data.pending_mesh = Some(mesh_handle);
-                    data.state = SubchunkRenderState::Rebuilding;
-                    true
-                }
-                _ => break 'apply,
-            };
+            apply_layer(
+                &mut mesh_data.alpha_test,
+                &mut data.current_alpha_test,
+                &mut data.pending_alpha_test,
+                &mut meshes,
+                was_dirty,
+            );
 
             if was_dirty {
-                // Перестройка завершится в `swap_meshes_system` — там меш попадёт в живой.
                 mesh_storage.push_swap(key);
             } else {
-                // Первый меш готов, сущности пока нет — её создаст следующий этап.
                 mesh_storage.mark_live(key);
             }
 
@@ -356,7 +540,6 @@ pub fn build_meshes_system(
     stats.record(Bucket::BuildMeshes, t.elapsed());
 }
 
-
 pub fn swap_meshes_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
@@ -365,43 +548,55 @@ pub fn swap_meshes_system(
 ) {
     let t = std::time::Instant::now();
 
-    // Слив `pending_swap`. Откладывать нечего: либо меш подменяется, либо ключ
-    // мёртв (чанк выгружен) — поэтому список просто очищается целиком.
     let count = mesh_storage.pending_swap.len();
 
     for i in 0..count {
         let key = mesh_storage.pending_swap[i];
 
-        let data = match mesh_storage.get_mut(&key) {
-            Some(d) => d,
-            None => continue,
-        };
+        let mut processed = false;
+        let mut has_any = false;
 
-        if data.state != SubchunkRenderState::Rebuilding {
-            continue;
+        if let Some(data) = mesh_storage.get_mut(&key) {
+            if data.state == SubchunkRenderState::Rebuilding {
+                swap_layer(
+                    &mut data.current_opaque,
+                    &mut data.pending_opaque,
+                    &mut data.entity_opaque,
+                    &mut commands,
+                    &mut meshes,
+                );
+
+                swap_layer(
+                    &mut data.current_transparent,
+                    &mut data.pending_transparent,
+                    &mut data.entity_transparent,
+                    &mut commands,
+                    &mut meshes,
+                );
+
+                swap_layer(
+                    &mut data.current_alpha_test,
+                    &mut data.pending_alpha_test,
+                    &mut data.entity_alpha_test,
+                    &mut commands,
+                    &mut meshes,
+                );
+
+                data.state = SubchunkRenderState::Ready;
+                has_any = has_any_mesh(data);
+                processed = true;
+            }
         }
 
-        // Удаляем старый меш из Assets
-        if let Some(old_mesh) = data.current_mesh.take() {
-            meshes.remove(&old_mesh);
+        if processed {
+            if has_any {
+                mesh_storage.mark_live(key);
+            } else {
+                // Все слои стали пустыми. Ключ может оставаться в live,
+                // update_mesh_entities_system сам его выбросит.
+                mesh_storage.live_dirty = true;
+            }
         }
-
-        // Заменяем на новый
-        let Some(new_mesh) = data.pending_mesh.take() else {
-            // Меша нет — субчанк стал пустым. Живым ему быть незачем.
-            data.state = SubchunkRenderState::Ready;
-            continue;
-        };
-
-        // Обновляем компонент Mesh3d на сущности
-        if let Some(entity) = data.entity {
-            commands.entity(entity).insert(Mesh3d(new_mesh.clone()));
-        }
-        data.current_mesh = Some(new_mesh);
-        data.state = SubchunkRenderState::Ready;
-        let _ = data;
-
-        mesh_storage.mark_live(key);
     }
 
     mesh_storage.pending_swap.clear();
@@ -412,7 +607,7 @@ pub fn swap_meshes_system(
 pub fn update_mesh_entities_system(
     mut mesh_storage: ResMut<MeshStorage>,
     mut commands: Commands,
-    voxel_material: Res<VoxelMaterialHandle>,
+    voxel_materials: Res<VoxelMaterials>,
     controller: Res<CameraController>,
     dimensions: Res<WorldDimensions>,
     origin: Res<MeshWorldOrigin>,
@@ -440,35 +635,6 @@ pub fn update_mesh_entities_system(
         let key = mesh_storage.live[r];
         r += 1;
 
-        let (mesh_handle, entity) = {
-            let data = match mesh_storage.get_mut(&key) {
-                Some(d) => d,
-                None => continue,
-            };
-
-            let mesh_handle = match &data.current_mesh {
-                Some(h) => h.clone(),
-                None => {
-                    if let Some(entity) = data.entity.take() {
-                        if let Some(slot) = data.pool_slot {
-                            pool.release(slot);
-                            // ТОЛЬКО скрываем
-                            commands.entity(entity)
-                                .insert(Visibility::Hidden)
-                                .remove::<PooledChunkEntity>();
-                            data.pool_slot = None;
-                        } else {
-                            commands.entity(entity).despawn();
-                        }
-                    }
-                    data.in_live = false;
-                    continue;
-                }
-            };
-
-            (mesh_handle, data.entity)
-        };
-
         let position = if key.chunk_x == cached_chunk_x && key.chunk_z == cached_chunk_z {
             cached_position
         } else {
@@ -487,43 +653,44 @@ pub fn update_mesh_entities_system(
             cached_position
         };
 
-        match entity {
-            Some(_) => {}
-            None => {
-                if let Some(slot) = pool.acquire() {
-                    let entity = pool.entity(slot).unwrap();
-                    pool.activate(slot);
-                    
-                    // Перезаписываем компоненты (MeshMaterial3d уже есть)
-                    commands.entity(entity).insert((
-                        Mesh3d(mesh_handle),
-                        Transform::from_translation(position),
-                        Visibility::Visible,
-                        PooledChunkEntity { slot },
-                    ));
+        let Some(data) = mesh_storage.get_mut(&key) else {
+            // Ключ удалён — просто выбрасываем из live.
+            continue;
+        };
 
-                    if let Some(d) = mesh_storage.get_mut(&key) {
-                        d.entity = Some(entity);
-                        d.pool_slot = Some(slot);
-                    }
-                } else {
-                    error!("Chunk entity pool exhausted!");
-                    
-                    let entity = commands
-                        .spawn((
-                            Mesh3d(mesh_handle),
-                            MeshMaterial3d(voxel_material.0.clone()),
-                            Transform::from_translation(position),
-                            Visibility::Visible,
-                        ))
-                        .id();
+        manage_layer(
+            &data.current_opaque,
+            &mut data.entity_opaque,
+            &mut data.pool_slot_opaque,
+            position,
+            &voxel_materials.opaque,
+            &mut commands,
+            &mut pool,
+        );
 
-                    if let Some(d) = mesh_storage.get_mut(&key) {
-                        d.entity = Some(entity);
-                        d.pool_slot = None;
-                    }
-                }
-            }
+        manage_layer(
+            &data.current_transparent,
+            &mut data.entity_transparent,
+            &mut data.pool_slot_transparent,
+            position,
+            &voxel_materials.transparent,
+            &mut commands,
+            &mut pool,
+        );
+
+        manage_layer(
+            &data.current_alpha_test,
+            &mut data.entity_alpha_test,
+            &mut data.pool_slot_alpha_test,
+            position,
+            &voxel_materials.alpha_test,
+            &mut commands,
+            &mut pool,
+        );
+
+        if !has_any_mesh(data) {
+            data.in_live = false;
+            continue;
         }
 
         mesh_storage.live[w] = key;
@@ -573,12 +740,26 @@ pub fn reset_world_origin_system(
         let Some(data) = mesh_storage.get(key) else {
             continue;
         };
-        let Some(entity) = data.entity else {
-            continue;
-        };
-        if let Ok(mut transform) = transforms.get_mut(entity) {
-            transform.translation.x -= shift_x as f32;
-            transform.translation.z -= shift_z as f32;
+
+        if let Some(ent) = data.entity_opaque {
+            if let Ok(mut transform) = transforms.get_mut(ent) {
+                transform.translation.x -= shift_x as f32;
+                transform.translation.z -= shift_z as f32;
+            }
+        }
+
+        if let Some(ent) = data.entity_transparent {
+            if let Ok(mut transform) = transforms.get_mut(ent) {
+                transform.translation.x -= shift_x as f32;
+                transform.translation.z -= shift_z as f32;
+            }
+        }
+
+        if let Some(ent) = data.entity_alpha_test {
+            if let Ok(mut transform) = transforms.get_mut(ent) {
+                transform.translation.x -= shift_x as f32;
+                transform.translation.z -= shift_z as f32;
+            }
         }
     }
 
@@ -588,10 +769,4 @@ pub fn reset_world_origin_system(
 fn find_chunk_slot(window: &ReadWindowManager, chunk_x: i64, chunk_z: i64) -> Option<usize> {
     let (cx, cz) = window.normalize_chunk(chunk_x, chunk_z);
     window.slot_for_chunk(cx, cz)
-}
-
-/// Маркер для pooled сущностей, хранит индекс слота в пуле
-#[derive(Component)]
-pub struct PooledChunkEntity {
-    pub slot: usize,
 }

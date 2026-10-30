@@ -2,14 +2,11 @@
 
 use bevy::prelude::*;
 
-use crate::render::{
-    CameraController, camera_input_system, camera_transform_system,
-    //init_voxel_material_system,
-};
+use crate::render::{CameraController, camera_input_system, camera_transform_system,};
 use crate::render::mesh_storage::MeshStorage;
 use crate::render::render_systems::{
     process_mesh_events_system, build_meshes_system, swap_meshes_system,
-    update_mesh_entities_system, reset_world_origin_system
+    update_mesh_entities_system, reset_world_origin_system,
 };
 use crate::render::entity_pool::{init_voxel_material_and_pool};
 

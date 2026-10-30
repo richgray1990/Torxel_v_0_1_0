@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::voxel::format::{WINDOW_CHUNK_COUNT, SUBCHUNKS_PER_CHUNK};
+use crate::voxel::format::{SUBCHUNKS_PER_CHUNK, WINDOW_CHUNK_COUNT};
 
 /// Максимум субчанков в хранилище: столько записей может быть одновременно.
 pub const MAX_SUBCHUNKS: usize = WINDOW_CHUNK_COUNT * SUBCHUNKS_PER_CHUNK;
@@ -17,30 +17,57 @@ pub enum SubchunkRenderState {
 }
 
 pub struct SubchunkRenderData {
-    pub current_mesh: Option<Handle<Mesh>>,
-    pub pending_mesh: Option<Handle<Mesh>>,
+    // Opaque
+    pub current_opaque: Option<Handle<Mesh>>,
+    pub pending_opaque: Option<Handle<Mesh>>,
+    pub entity_opaque: Option<Entity>,
+    pub pool_slot_opaque: Option<usize>,
+
+    // Transparent
+    pub current_transparent: Option<Handle<Mesh>>,
+    pub pending_transparent: Option<Handle<Mesh>>,
+    pub entity_transparent: Option<Entity>,
+    pub pool_slot_transparent: Option<usize>,
+
+    // AlphaTest
+    pub current_alpha_test: Option<Handle<Mesh>>,
+    pub pending_alpha_test: Option<Handle<Mesh>>,
+    pub entity_alpha_test: Option<Entity>,
+    pub pool_slot_alpha_test: Option<usize>,
+
     pub state: SubchunkRenderState,
-    pub entity: Option<Entity>,
+
     pub chunk_x: i64,
     pub chunk_z: i64,
     pub subchunk_index: usize,
-    pub pool_slot: Option<usize>,
-    /// Ключ присутствует в `MeshStorage::live`. Защита от дублей: `live`
-    /// долгоживущий, и без флага повторный переход в `Ready` добавил бы ключ дважды.
+
     pub in_live: bool,
 }
 
 impl SubchunkRenderData {
     pub fn new(chunk_x: i64, chunk_z: i64, subchunk_index: usize) -> Self {
         Self {
-            current_mesh: None,
-            pending_mesh: None,
+            current_opaque: None,
+            pending_opaque: None,
+            entity_opaque: None,
+            pool_slot_opaque: None,
+
+            current_transparent: None,
+            pending_transparent: None,
+            entity_transparent: None,
+            pool_slot_transparent: None,
+
+            current_alpha_test: None,
+            pending_alpha_test: None,
+            entity_alpha_test: None,
+            pool_slot_alpha_test: None,
+
             state: SubchunkRenderState::Empty,
-            entity: None,
+
             chunk_x,
             chunk_z,
             subchunk_index,
-            pool_slot: None,
+
             in_live: false,
         }
     }
